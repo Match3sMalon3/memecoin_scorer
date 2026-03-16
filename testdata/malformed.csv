@@ -1,0 +1,4 @@
+token_mint,launch_time,cohort_buyer_count,buyers_min0_1,buyers_min1_5,sniper_intensity_ratio,first_minute_share,size_diversity_ratio,manipulation_risk_score,mfe_multiple_15m,mfe_multiple_30m,median_realized_return_pct,wallets_that_exited,wallets_gt_25pct,buy_sol_0_35m,sell_sol_0_35m,is_tradeable_30m,is_clean_tradeable_30m
+MISSING_COLS,2024-01-15T14:00:00Z,10,5
+EMPTY_FIELDS,2024-01-15T14:01:00Z,,,,,,,,,,,,,,,,
+BAD_NUMERIC,2024-01-15T14:02:00Z,N/A,10,5,0.10,0.10,0.50,0,1.00,1.50,0.0,5,1,20.0,15.0,false,false

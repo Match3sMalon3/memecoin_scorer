@@ -1,0 +1,20 @@
+thresholds:
+  min_cohort_buyers: 10
+  mfe_threshold: 1.20
+  min_sell_trades: 20
+  min_sell_unique_traders: 5
+  max_manipulation_risk_score: 0
+  max_first_minute_share: 0.25
+  max_sniper_intensity_ratio: 0.30
+  min_size_diversity_ratio: 0.35
+  min_wallets_that_exited: 5
+  min_median_realized_return: 0.0
+  min_realized_return_for_clean: 10.0
+  min_winner_ratio_for_clean: 0.30
+
+weights:
+  # Component weights must sum to 1.0.
+  # All are unvalidated priors — retune after 200 live signals.
+  opportunity: 0.50   # unvalidated prior — retune after 200 live signals
+  adversarial: 0.30   # unvalidated prior — retune after 200 live signals
+  monetization: 0.20  # unvalidated prior — retune after 200 live signals
