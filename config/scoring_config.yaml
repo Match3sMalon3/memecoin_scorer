@@ -11,10 +11,10 @@ thresholds:
   min_median_realized_return: 0.0
   min_realized_return_for_clean: 10.0
   min_winner_ratio_for_clean: 0.30
+  min_wallets_gt_25pct_for_clean: 3
+  min_opportunity_score_to_trade: 62.0
 
 weights:
-  # Component weights must sum to 1.0.
-  # All are unvalidated priors — retune after 200 live signals.
-  opportunity: 0.50   # unvalidated prior — retune after 200 live signals
-  adversarial: 0.30   # unvalidated prior — retune after 200 live signals
-  monetization: 0.20  # unvalidated prior — retune after 200 live signals
+  opportunity: 0.50
+  adversarial: 0.30
+  monetization: 0.20

@@ -31,15 +31,45 @@ func ParseReader(r io.Reader) ([]model.TokenFeatures, error) {
 func parseReader(r io.Reader) ([]model.TokenFeatures, error) {
 	cr := csv.NewReader(r)
 	cr.TrimLeadingSpace = true
-	cr.FieldsPerRecord = -1 // allow variable-length rows; missing cols are treated as zero
+	cr.FieldsPerRecord = -1
 
 	header, err := cr.Read()
 	if err != nil {
 		return nil, fmt.Errorf("reading CSV header: %w", err)
 	}
+
 	idx := make(map[string]int, len(header))
 	for i, h := range header {
 		idx[strings.TrimSpace(h)] = i
+	}
+
+	// Fail fast if any required column is absent.
+	// is_tradeable_30m and is_clean_tradeable_30m are intentionally optional
+	// so the scorer can run on unlabeled live exports.
+	requiredCols := []string{
+		"token_mint",
+		"launch_time",
+		"cohort_buyer_count",
+		"buyers_min0_1",
+		"buyers_min1_5",
+		"sniper_intensity_ratio",
+		"first_minute_share",
+		"size_diversity_ratio",
+		"manipulation_risk_score",
+		"mfe_multiple_15m",
+		"mfe_multiple_30m",
+		"median_realized_return_pct",
+		"wallets_that_exited",
+		"wallets_gt_25pct",
+		"buy_sol_0_35m",
+		"sell_sol_0_35m",
+		"sell_trade_count_5to35m",
+		"sell_unique_traders_5to35m",
+	}
+	for _, col := range requiredCols {
+		if _, ok := idx[col]; !ok {
+			return nil, fmt.Errorf("missing required CSV column %q", col)
+		}
 	}
 
 	var out []model.TokenFeatures
@@ -186,6 +216,14 @@ func recordToRow(rec []string, idx map[string]int) (model.TokenRow, error) {
 	if err != nil {
 		return model.TokenRow{}, err
 	}
+	sellTradeCount, err := parseInt("sell_trade_count_5to35m")
+	if err != nil {
+		return model.TokenRow{}, err
+	}
+	sellUniqueTraders, err := parseInt("sell_unique_traders_5to35m")
+	if err != nil {
+		return model.TokenRow{}, err
+	}
 
 	return model.TokenRow{
 		TokenMint:               get("token_mint"),
@@ -204,6 +242,8 @@ func recordToRow(rec []string, idx map[string]int) (model.TokenRow, error) {
 		WalletsGt25Pct:          walletsGt25,
 		BuySol0_35m:             buySol,
 		SellSol0_35m:            sellSol,
+		SellTradeCount5to35m:    sellTradeCount,
+		SellUniqueTraders5to35m: sellUniqueTraders,
 		IsTradeable30m:          parseBool("is_tradeable_30m"),
 		IsCleanTradeable30m:     parseBool("is_clean_tradeable_30m"),
 	}, nil

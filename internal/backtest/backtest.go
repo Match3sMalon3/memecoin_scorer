@@ -42,9 +42,9 @@ func computeSummary(results []model.BacktestResult) model.Summary {
 		nonTradeableReturns []float64
 		cleanReturns        []float64
 
-		tradeableFMS    float64
-		nonTradeableFMS float64
-		tradeableSniper float64
+		tradeableFMS       float64
+		nonTradeableFMS    float64
+		tradeableSniper    float64
 		nonTradeableSniper float64
 
 		tradeableFMSCount    int
@@ -53,11 +53,11 @@ func computeSummary(results []model.BacktestResult) model.Summary {
 
 	// Precision counters: predicted-positive that are actually positive.
 	var (
-		predictedTradeable      int
-		truePositiveTradeable   int
-		predictedClean          int
-		truePositiveClean       int
-		actualTradeableCount    int
+		predictedTradeable    int
+		truePositiveTradeable int
+		predictedClean        int
+		truePositiveClean     int
+		actualTradeableCount  int
 	)
 
 	for _, r := range results {

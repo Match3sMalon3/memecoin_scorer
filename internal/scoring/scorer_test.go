@@ -49,6 +49,8 @@ func cleanWinner() model.TokenFeatures {
 			WalletsGt25Pct:          8,
 			BuySol0_35m:             100.0,
 			SellSol0_35m:            50.0,
+			SellTradeCount5to35m:    25,
+			SellUniqueTraders5to35m: 10,
 		},
 		WinnerExitRatio: 8.0 / 20.0, // 0.40
 		BuyFlowPct:      100.0 / 150.0,
@@ -97,7 +99,56 @@ func TestScore_Gate_MinCohortBuyers(t *testing.T) {
 	f.CohortBuyerCount = 9 // one below minimum of 10
 	res := scoring.Score(f, testCfg())
 	if res.IsTradeable30m {
-		t.Error("expected IsTradeable30m = false when cohort_buyer_count < min")
+		t.Error("expected IsTradeable30m = false when cohort_buyer_count < 10")
+	}
+	if res.OpportunityScore != 0 {
+		t.Errorf("expected OpportunityScore = 0 for non-tradeable, got %.2f", res.OpportunityScore)
+	}
+}
+
+func TestScore_Gate_MfeMultiple30m(t *testing.T) {
+	f := cleanWinner()
+	f.MfeMultiple30m = 1.19 // not > 1.20
+	res := scoring.Score(f, testCfg())
+	if res.IsTradeable30m {
+		t.Error("expected IsTradeable30m = false when mfe_multiple_30m <= 1.20")
+	}
+	if res.OpportunityScore != 0 {
+		t.Errorf("expected OpportunityScore = 0 for non-tradeable, got %.2f", res.OpportunityScore)
+	}
+}
+
+func TestScore_Gate_BuySellSol(t *testing.T) {
+	f := cleanWinner()
+	f.BuySol0_35m = 50.0
+	f.SellSol0_35m = 50.0 // not >
+	res := scoring.Score(f, testCfg())
+	if res.IsTradeable30m {
+		t.Error("expected IsTradeable30m = false when buy_sol_0_35m <= sell_sol_0_35m")
+	}
+	if res.OpportunityScore != 0 {
+		t.Errorf("expected OpportunityScore = 0 for non-tradeable, got %.2f", res.OpportunityScore)
+	}
+}
+
+func TestScore_Gate_SellTradeCount5to35m(t *testing.T) {
+	f := cleanWinner()
+	f.SellTradeCount5to35m = 19 // < 20
+	res := scoring.Score(f, testCfg())
+	if res.IsTradeable30m {
+		t.Error("expected IsTradeable30m = false when sell_trade_count_5to35m < 20")
+	}
+	if res.OpportunityScore != 0 {
+		t.Errorf("expected OpportunityScore = 0 for non-tradeable, got %.2f", res.OpportunityScore)
+	}
+}
+
+func TestScore_Gate_SellUniqueTraders5to35m(t *testing.T) {
+	f := cleanWinner()
+	f.SellUniqueTraders5to35m = 4 // < 5
+	res := scoring.Score(f, testCfg())
+	if res.IsTradeable30m {
+		t.Error("expected IsTradeable30m = false when sell_unique_traders_5to35m < 5")
 	}
 	if res.OpportunityScore != 0 {
 		t.Errorf("expected OpportunityScore = 0 for non-tradeable, got %.2f", res.OpportunityScore)
@@ -106,92 +157,112 @@ func TestScore_Gate_MinCohortBuyers(t *testing.T) {
 
 func TestScore_Gate_ManipulationRisk(t *testing.T) {
 	f := cleanWinner()
-	f.ManipulationRiskScore = 1 // above max of 0
+	f.ManipulationRiskScore = 1 // != 0
 	res := scoring.Score(f, testCfg())
-	if res.IsTradeable30m {
-		t.Error("expected IsTradeable30m = false when manipulation_risk_score > 0")
+	if !res.IsTradeable30m {
+		t.Error("expected IsTradeable30m = true")
+	}
+	if res.IsCleanTradeable30m {
+		t.Error("expected IsCleanTradeable30m = false when manipulation_risk_score != 0")
 	}
 }
 
 func TestScore_Gate_MaxFirstMinuteShare(t *testing.T) {
 	f := cleanWinner()
-	f.FirstMinuteShare = 0.30 // above max of 0.25
+	f.FirstMinuteShare = 0.30 // above 0.25
 	res := scoring.Score(f, testCfg())
-	if res.IsTradeable30m {
-		t.Error("expected IsTradeable30m = false when first_minute_share > max")
+	if !res.IsTradeable30m {
+		t.Error("expected IsTradeable30m = true")
+	}
+	if res.IsCleanTradeable30m {
+		t.Error("expected IsCleanTradeable30m = false when first_minute_share > 0.25")
 	}
 }
 
 func TestScore_Gate_MaxSniperIntensityRatio(t *testing.T) {
 	f := cleanWinner()
-	f.SniperIntensityRatio = 0.31 // above max of 0.30
+	f.SniperIntensityRatio = 0.31 // above 0.30
 	res := scoring.Score(f, testCfg())
-	if res.IsTradeable30m {
-		t.Error("expected IsTradeable30m = false when sniper_intensity_ratio > max")
+	if !res.IsTradeable30m {
+		t.Error("expected IsTradeable30m = true")
+	}
+	if res.IsCleanTradeable30m {
+		t.Error("expected IsCleanTradeable30m = false when sniper_intensity_ratio > 0.30")
 	}
 }
 
 func TestScore_Gate_MinSizeDiversityRatio(t *testing.T) {
 	f := cleanWinner()
-	f.SizeDiversityRatio = 0.34 // below min of 0.35
+	f.SizeDiversityRatio = 0.34 // below 0.35
 	res := scoring.Score(f, testCfg())
-	if res.IsTradeable30m {
-		t.Error("expected IsTradeable30m = false when size_diversity_ratio < min")
+	if !res.IsTradeable30m {
+		t.Error("expected IsTradeable30m = true")
+	}
+	if res.IsCleanTradeable30m {
+		t.Error("expected IsCleanTradeable30m = false when size_diversity_ratio < 0.35")
 	}
 }
 
 func TestScore_Gate_MinWalletsThatExited(t *testing.T) {
 	f := cleanWinner()
-	f.WalletsThatExited = 4 // below min of 5
+	f.WalletsThatExited = 4 // below 5
 	f.WinnerExitRatio = 0   // recalculate
 	res := scoring.Score(f, testCfg())
-	if res.IsTradeable30m {
-		t.Error("expected IsTradeable30m = false when wallets_that_exited < min")
+	if !res.IsTradeable30m {
+		t.Error("expected IsTradeable30m = true")
+	}
+	if res.IsCleanTradeable30m {
+		t.Error("expected IsCleanTradeable30m = false when wallets_that_exited < 5")
 	}
 }
 
 func TestScore_Gate_MinMedianRealizedReturn(t *testing.T) {
 	f := cleanWinner()
-	f.MedianRealizedReturnPct = -0.1 // below min of 0.0
+	f.MedianRealizedReturnPct = -0.1 // below 0
 	res := scoring.Score(f, testCfg())
-	if res.IsTradeable30m {
-		t.Error("expected IsTradeable30m = false when median_realized_return_pct < 0")
+	if !res.IsTradeable30m {
+		t.Error("expected IsTradeable30m = true")
+	}
+	if res.IsCleanTradeable30m {
+		t.Error("expected IsCleanTradeable30m = false when median_realized_return_pct < 0")
 	}
 }
 
 func TestScore_Gate_MfeThreshold(t *testing.T) {
 	f := cleanWinner()
-	f.MfeMultiple30m = 1.19 // below threshold of 1.20
+	f.MfeMultiple30m = 1.19 // not > 1.20
 	res := scoring.Score(f, testCfg())
 	if res.IsTradeable30m {
-		t.Error("expected IsTradeable30m = false when mfe_multiple_30m < threshold")
+		t.Error("expected IsTradeable30m = false when mfe_multiple_30m <= 1.20")
 	}
 }
 
 func TestScore_CleanGate_MedianReturn(t *testing.T) {
 	f := cleanWinner()
-	f.MedianRealizedReturnPct = 9.9 // below min_realized_return_for_clean (10.0) but >= 0
+	f.MedianRealizedReturnPct = 9.9 // below 10.0
+	f.WalletsGt25Pct = 2            // < 3
+	f.WinnerExitRatio = 0.10        // < 0.30
 	res := scoring.Score(f, testCfg())
 	if !res.IsTradeable30m {
 		t.Error("expected IsTradeable30m = true")
 	}
 	if res.IsCleanTradeable30m {
-		t.Error("expected IsCleanTradeable30m = false when median_return < min_for_clean")
+		t.Error("expected IsCleanTradeable30m = false when median_return < 10 and not (wallets_gt_25pct >=3 and winner_exit_ratio >=0.30)")
 	}
 }
 
 func TestScore_CleanGate_WinnerRatio(t *testing.T) {
 	f := cleanWinner()
-	// Set winner ratio below 0.30: 1/10 = 0.10
+	f.MedianRealizedReturnPct = 5.0 // < 10
 	f.WalletsThatExited = 10
-	f.WalletsGt25Pct = 1
-	f.WinnerExitRatio = 1.0 / 10.0
+	f.WalletsGt25Pct = 5     // >= 3
+	f.WinnerExitRatio = 0.10 // < 0.30
 	res := scoring.Score(f, testCfg())
 	if !res.IsTradeable30m {
 		t.Error("expected IsTradeable30m = true")
 	}
 	if res.IsCleanTradeable30m {
-		t.Error("expected IsCleanTradeable30m = false when winner_exit_ratio < min")
+		t.Error("expected IsCleanTradeable30m = false when median_return < 10 and winner_exit_ratio < 0.30")
 	}
 }
 
@@ -227,7 +298,7 @@ func TestScore_FeaturePassthrough(t *testing.T) {
 
 func TestScore_NonTradeable_ZeroScore(t *testing.T) {
 	f := cleanWinner()
-	f.ManipulationRiskScore = 1 // hard fail
+	f.CohortBuyerCount = 9 // fail tradeable
 	res := scoring.Score(f, testCfg())
 	if res.OpportunityScore != 0 {
 		t.Errorf("non-tradeable token must have OpportunityScore = 0, got %.2f", res.OpportunityScore)

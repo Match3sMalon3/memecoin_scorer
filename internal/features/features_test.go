@@ -10,7 +10,8 @@ import (
 const csvHeader = "token_mint,launch_time,cohort_buyer_count,buyers_min0_1,buyers_min1_5," +
 	"sniper_intensity_ratio,first_minute_share,size_diversity_ratio,manipulation_risk_score," +
 	"mfe_multiple_15m,mfe_multiple_30m,median_realized_return_pct,wallets_that_exited," +
-	"wallets_gt_25pct,buy_sol_0_35m,sell_sol_0_35m,is_tradeable_30m,is_clean_tradeable_30m\n"
+	"wallets_gt_25pct,buy_sol_0_35m,sell_sol_0_35m,sell_trade_count_5to35m,sell_unique_traders_5to35m," +
+	"is_tradeable_30m,is_clean_tradeable_30m\n"
 
 func csvRow(fields ...string) string {
 	return strings.Join(fields, ",") + "\n"
@@ -22,7 +23,7 @@ func TestWinnerExitRatio_Normal(t *testing.T) {
 		"TOKENA", "2024-01-01T00:00:00Z", "20", "10", "10",
 		"0.10", "0.10", "0.60", "0",
 		"1.50", "2.00", "5.0",
-		"8", "4", "50.0", "30.0", "false", "false",
+		"8", "4", "50.0", "30.0", "25", "10", "false", "false",
 	)
 	rows, err := features.ParseReader(strings.NewReader(csv))
 	if err != nil {
@@ -44,7 +45,7 @@ func TestWinnerExitRatio_ZeroExits(t *testing.T) {
 		"TOKENB", "2024-01-01T00:00:00Z", "20", "10", "10",
 		"0.10", "0.10", "0.60", "0",
 		"1.50", "2.00", "5.0",
-		"0", "0", "50.0", "30.0", "false", "false",
+		"0", "0", "50.0", "30.0", "25", "10", "false", "false",
 	)
 	rows, err := features.ParseReader(strings.NewReader(csv))
 	if err != nil {
@@ -61,7 +62,7 @@ func TestBuyFlowPct_Normal(t *testing.T) {
 		"TOKENC", "2024-01-01T00:00:00Z", "20", "10", "10",
 		"0.10", "0.10", "0.60", "0",
 		"1.50", "2.00", "5.0",
-		"10", "3", "80.0", "20.0", "false", "false",
+		"10", "3", "80.0", "20.0", "25", "10", "false", "false",
 	)
 	rows, err := features.ParseReader(strings.NewReader(csv))
 	if err != nil {
@@ -80,7 +81,7 @@ func TestBuyFlowPct_ZeroVolume(t *testing.T) {
 		"TOKEND", "2024-01-01T00:00:00Z", "20", "10", "10",
 		"0.10", "0.10", "0.60", "0",
 		"1.50", "2.00", "5.0",
-		"10", "3", "0.0", "0.0", "false", "false",
+		"10", "3", "0.0", "0.0", "25", "10", "false", "false",
 	)
 	rows, err := features.ParseReader(strings.NewReader(csv))
 	if err != nil {
@@ -96,7 +97,7 @@ func TestSniperIntensityRatio_ReadFromCSV(t *testing.T) {
 		"TOKENE", "2024-01-01T00:00:00Z", "20", "10", "10",
 		"0.27", "0.10", "0.60", "0",
 		"1.50", "2.00", "5.0",
-		"10", "3", "50.0", "30.0", "false", "false",
+		"10", "3", "50.0", "30.0", "25", "10", "false", "false",
 	)
 	rows, err := features.ParseReader(strings.NewReader(csv))
 	if err != nil {
@@ -112,7 +113,7 @@ func TestFirstMinuteShare_ReadFromCSV(t *testing.T) {
 		"TOKENF", "2024-01-01T00:00:00Z", "20", "10", "10",
 		"0.10", "0.19", "0.60", "0",
 		"1.50", "2.00", "5.0",
-		"10", "3", "50.0", "30.0", "false", "false",
+		"10", "3", "50.0", "30.0", "25", "10", "false", "false",
 	)
 	rows, err := features.ParseReader(strings.NewReader(csv))
 	if err != nil {
@@ -125,7 +126,7 @@ func TestFirstMinuteShare_ReadFromCSV(t *testing.T) {
 
 func TestEmptyNumericFields_DefaultToZero(t *testing.T) {
 	// Empty numeric fields should parse as 0, not error.
-	csv := csvHeader + "TOKENG,2024-01-01T00:00:00Z,,,,,,,,,,,,,,,,\n"
+	csv := csvHeader + "TOKENG,2024-01-01T00:00:00Z,,,,,,,,,,,,,,,,,,,\n"
 	rows, err := features.ParseReader(strings.NewReader(csv))
 	if err != nil {
 		t.Fatalf("empty fields should not error, got: %v", err)

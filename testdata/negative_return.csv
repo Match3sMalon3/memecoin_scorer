@@ -1,3 +1,3 @@
-token_mint,launch_time,cohort_buyer_count,buyers_min0_1,buyers_min1_5,sniper_intensity_ratio,first_minute_share,size_diversity_ratio,manipulation_risk_score,mfe_multiple_15m,mfe_multiple_30m,median_realized_return_pct,wallets_that_exited,wallets_gt_25pct,buy_sol_0_35m,sell_sol_0_35m,is_tradeable_30m,is_clean_tradeable_30m
-NEGRET1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,2024-01-15T12:00:00Z,20,12,8,0.10,0.10,0.60,0,1.50,2.00,-5.0,10,3,50.0,30.0,false,false
-NEGRET2xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,2024-01-15T12:05:00Z,30,18,12,0.12,0.08,0.65,0,1.60,2.20,-12.5,8,2,60.0,40.0,false,false
+token_mint,launch_time,cohort_buyer_count,buyers_min0_1,buyers_min1_5,sniper_intensity_ratio,first_minute_share,size_diversity_ratio,manipulation_risk_score,mfe_multiple_15m,mfe_multiple_30m,median_realized_return_pct,wallets_that_exited,wallets_gt_25pct,buy_sol_0_35m,sell_sol_0_35m,sell_trade_count_5to35m,sell_unique_traders_5to35m,is_tradeable_30m,is_clean_tradeable_30m
+NEGRET1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,2024-01-15T12:00:00Z,20,12,8,0.10,0.10,0.60,0,1.50,2.00,-5.0,10,3,30.0,50.0,25,10,false,false
+NEGRET2xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,2024-01-15T12:05:00Z,30,18,12,0.12,0.08,0.65,0,1.60,2.20,-12.5,8,2,40.0,60.0,25,10,false,false

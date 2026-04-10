@@ -58,7 +58,6 @@ func main() {
 		defer f.Close()
 		jsonOut = f
 	}
-	fmt.Fprintln(jsonOut, "\n=== Backtest Summary ===")
 	if err := report.WriteJSON(jsonOut, summary); err != nil {
 		log.Fatalf("writing JSON: %v", err)
 	}
