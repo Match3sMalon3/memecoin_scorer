@@ -238,9 +238,24 @@ type LiveSnapshot struct {
 	// ExecutionURL is a direct click-through helper for operator execution context.
 	ExecutionURL string `json:"execution_url"`
 
+	PriorityLabel             string `json:"priority_label"`
+	ActionabilityLabel        string `json:"actionability_label"`
+	HistoricalAnalogueSummary string `json:"historical_analogue_summary"`
+	HistoricalOutcomeBand     string `json:"historical_outcome_band"`
+	HistoricalTimeToOutcome   string `json:"historical_time_to_outcome"`
+	UpgradeTriggers           string `json:"upgrade_triggers"`
+	InvalidateTriggers        string `json:"invalidate_triggers"`
+	OperatorFocus             string `json:"operator_focus"`
+	RelativeSetupLabel        string `json:"relative_setup_label"`
+	TrustLabel                string `json:"trust_label"`
+	TrustReason               string `json:"trust_reason"`
+	AsymmetryLabel            string `json:"asymmetry_label"`
+	AsymmetryReason           string `json:"asymmetry_reason"`
+
 	// Compatibility fields used by the runtime audit builders.
 	LastPriceSol float64 `json:"-"`
 	MarketCapSol float64 `json:"-"`
+	Layer0Reject bool    `json:"-"`
 
 	// --- 7-gate engine result ---
 

@@ -186,6 +186,14 @@ type Decision struct {
 	OperatorVerdict string `json:"operator_verdict"`
 	ExecutionURL    string `json:"execution_url"`
 
+	PriorityLabel             string `json:"priority_label"`
+	ActionabilityLabel        string `json:"actionability_label"`
+	HistoricalAnalogueSummary string `json:"historical_analogue_summary"`
+	HistoricalOutcomeBand     string `json:"historical_outcome_band"`
+	HistoricalTimeToOutcome   string `json:"historical_time_to_outcome"`
+	UpgradeTriggers           string `json:"upgrade_triggers"`
+	InvalidateTriggers        string `json:"invalidate_triggers"`
+
 	// --- 7-gate engine result ---
 	Engine model.EngineDecision `json:"engine"`
 }
@@ -370,21 +378,33 @@ func finalize(d Decision, snap model.TokenSnapshot, cfg LiveConfig, now time.Tim
 		d.ConfidenceScore = float64(d.Engine.ScoreCap)
 	}
 	liveRow := &model.LiveSnapshot{
-		TokenSnapshot:       snap,
-		EffectiveBuyers1m:   d.EffectiveBuyers1m,
-		EffectiveBuyers5m:   d.EffectiveBuyers5m,
-		ClusteringRowStatus: d.ClusteringRowStatus,
-		AdversarialScore:    d.AdversarialScore,
-		EstimatedImpactPct:  d.EstimatedImpactPct,
-		LastPriceSol:        snap.LastPriceSOL,
-		MarketCapSol:        snap.MarketCapSOL,
-		Engine:              d.Engine,
+		TokenSnapshot:             snap,
+		EffectiveBuyers1m:         d.EffectiveBuyers1m,
+		EffectiveBuyers5m:         d.EffectiveBuyers5m,
+		LiquidityProxySOL:         d.LiquidityProxySOL,
+		ClusteringRowStatus:       d.ClusteringRowStatus,
+		ClusterCompressionRatio5m: d.ClusterCompressionRatio5m,
+		AdversarialScore:          d.AdversarialScore,
+		EstimatedImpactPct:        d.EstimatedImpactPct,
+		Decision:                  d.Label,
+		LastPriceSol:              snap.LastPriceSOL,
+		MarketCapSol:              snap.MarketCapSOL,
+		Layer0Reject:              d.Engine.Layer0Reject,
+		Engine:                    d.Engine,
 	}
 	d.WhyNow = BuildWhyNow(liveRow)
 	d.WhyNotHigher = BuildWhyNotHigher(liveRow)
 	d.DominantBlocker = BuildDominantBlocker(liveRow)
 	d.OperatorVerdict = BuildOperatorVerdict(liveRow)
+	liveRow.OperatorVerdict = d.OperatorVerdict
 	d.ExecutionURL = BuildExecutionURL(snap.Mint)
+	d.ActionabilityLabel = BuildActionabilityLabel(liveRow)
+	liveRow.ActionabilityLabel = d.ActionabilityLabel
+	d.HistoricalAnalogueSummary = BuildHistoricalAnalogueSummary(liveRow)
+	d.HistoricalOutcomeBand = BuildHistoricalOutcomeBand(liveRow)
+	d.HistoricalTimeToOutcome = BuildHistoricalTimeToOutcome(liveRow)
+	d.UpgradeTriggers = BuildUpgradeTriggers(liveRow)
+	d.InvalidateTriggers = BuildInvalidateTriggers(liveRow)
 	return d
 }
 
@@ -511,7 +531,13 @@ func BuildWhyNow(s *model.LiveSnapshot) string {
 }
 
 func BuildDominantBlocker(s *model.LiveSnapshot) string {
-	if s.Engine.Layer0Reject && strings.Contains(strings.ToLower(s.Engine.Layer0Reason), "impossible_execution") {
+	layer0Reject := false
+	layer0Reason := ""
+	if s.Engine.Layer0Reject {
+		layer0Reject = true
+		layer0Reason = strings.ToLower(s.Engine.Layer0Reason)
+	}
+	if layer0Reject && strings.Contains(layer0Reason, "impossible_execution") {
 		return "impossible execution • thin liquidity"
 	}
 	if s.ClusteringRowStatus == "full_fallback" {
@@ -556,6 +582,309 @@ func BuildOperatorVerdict(s *model.LiveSnapshot) string {
 		return "clean-ish but immature"
 	}
 	return "low-confidence setup"
+}
+
+func BuildHistoricalAnalogueSummary(s *model.LiveSnapshot) string {
+	if s.Engine.Layer0Reject || s.LiquidityProxySOL < 5 {
+		return "Historically resembles failed early-interest names: attention appears before executable liquidity."
+	}
+	if s.MarketCapSol == 0 {
+		return "Historically resembles incomplete structure: flow appears, but holder-backed market-cap formation is not yet visible."
+	}
+	if s.ClusteringRowStatus != "resolved" {
+		return "Historically resembles compromised flow: participation exists, but clustering trust is not yet clean."
+	}
+	if s.Top10HolderPct >= 0.85 {
+		return "Historically resembles concentrated launches: attention can persist, but durability is impaired by holder structure."
+	}
+	return "Historically resembles monitorable early structure: weak edge now, but upgradeable if execution and buyer quality improve."
+}
+
+func BuildHistoricalOutcomeBand(s *model.LiveSnapshot) string {
+	if s.Engine.Layer0Reject || s.LiquidityProxySOL < 5 {
+		return "usually stalls unless liquidity improves sharply"
+	}
+	if s.MarketCapSol == 0 {
+		return "often noisy until holder-backed structure appears"
+	}
+	if s.ClusteringRowStatus != "resolved" {
+		return "often fades unless clustering resolves cleanly"
+	}
+	if s.Top10HolderPct >= 0.85 {
+		return "often squeezes briefly, then weakens unless concentration normalizes"
+	}
+	return "can improve if execution quality and buyer quality continue strengthening"
+}
+
+func BuildHistoricalTimeToOutcome(s *model.LiveSnapshot) string {
+	if s.Engine.Layer0Reject || s.LiquidityProxySOL < 5 {
+		return "usually decided quickly"
+	}
+	if s.MarketCapSol == 0 {
+		return "usually unresolved until holder structure appears"
+	}
+	if s.ClusteringRowStatus != "resolved" {
+		return "usually decided within the next buyer-quality cycle"
+	}
+	return "usually decided over the next few buyer-quality refreshes"
+}
+
+func BuildUpgradeTriggers(s *model.LiveSnapshot) string {
+	var out []string
+
+	if s.LiquidityProxySOL < 5 {
+		out = append(out, "liquidity must clear 5 SOL minimum")
+	}
+	if s.EstimatedImpactPct > 15 || s.EstimatedImpactPct == 0 {
+		out = append(out, "impact must compress to 15% or lower")
+	}
+	if s.EffectiveBuyers5m < 5 {
+		out = append(out, "effective buyers /5m must reach 5+")
+	}
+	if s.MarketCapSol == 0 {
+		out = append(out, "holder-backed market-cap structure must appear")
+	}
+	if s.ClusteringRowStatus != "resolved" {
+		out = append(out, "clustering must resolve without fallback")
+	}
+	if s.Top10HolderPct >= 0.85 {
+		out = append(out, "top-holder concentration must normalize")
+	}
+
+	if len(out) == 0 {
+		out = append(out, "sustain buyer quality and execution quality")
+	}
+	return strings.Join(out, " • ")
+}
+
+func BuildInvalidateTriggers(s *model.LiveSnapshot) string {
+	var out []string
+
+	if s.Engine.Layer0Reject || s.LiquidityProxySOL < 5 {
+		out = append(out, "continued impossible execution keeps this non-viable")
+	}
+	if s.ClusteringRowStatus == "full_fallback" {
+		out = append(out, "persistent full fallback invalidates buyer trust")
+	}
+	if s.MarketCapSol == 0 {
+		out = append(out, "continued lack of holder proxy keeps structure incomplete")
+	}
+	if s.Top10HolderPct >= 0.85 {
+		out = append(out, "further concentration invalidates durability")
+	}
+	if s.EstimatedImpactPct > 25 {
+		out = append(out, "impact expansion above 25% invalidates execution quality")
+	}
+	if s.EffectiveBuyers5m < 3 {
+		out = append(out, "buyer quality staying below 3 effective buyers kills the setup")
+	}
+
+	if len(out) == 0 {
+		out = append(out, "loss of buyer quality invalidates the setup")
+	}
+	return strings.Join(out, " • ")
+}
+
+func BuildActionabilityLabel(s *model.LiveSnapshot) string {
+	if s.Decision == "BUY" || s.Decision == "READY" {
+		return "actionable now"
+	}
+	if s.EffectiveBuyers5m >= 5 && s.LiquidityProxySOL >= 5 && s.EstimatedImpactPct <= 15 {
+		return "observe closely"
+	}
+	if s.MarketCapSol == 0 || s.Engine.Layer0Reject {
+		return "not actionable"
+	}
+	return "reject quickly"
+}
+
+func AssignPriorityLabels(rows []model.LiveSnapshot) {
+	bestMint := bestPriorityMint(rows)
+	for i := range rows {
+		rows[i].Layer0Reject = rows[i].Engine.Layer0Reject
+		rows[i].ExecutionURL = BuildExecutionURL(rows[i].Mint)
+		rows[i].WhyNow = BuildWhyNow(&rows[i])
+		rows[i].WhyNotHigher = BuildWhyNotHigher(&rows[i])
+		rows[i].DominantBlocker = BuildDominantBlocker(&rows[i])
+		rows[i].OperatorVerdict = BuildOperatorVerdict(&rows[i])
+		rows[i].ActionabilityLabel = BuildActionabilityLabel(&rows[i])
+		rows[i].HistoricalAnalogueSummary = BuildHistoricalAnalogueSummary(&rows[i])
+		rows[i].HistoricalOutcomeBand = BuildHistoricalOutcomeBand(&rows[i])
+		rows[i].HistoricalTimeToOutcome = BuildHistoricalTimeToOutcome(&rows[i])
+		rows[i].UpgradeTriggers = BuildUpgradeTriggers(&rows[i])
+		rows[i].InvalidateTriggers = BuildInvalidateTriggers(&rows[i])
+		rows[i].PriorityLabel = BuildPriorityLabel(&rows[i], bestMint)
+		rows[i].OperatorFocus = BuildOperatorFocus(&rows[i])
+		rows[i].RelativeSetupLabel = BuildRelativeSetupLabel(&rows[i])
+		rows[i].TrustLabel = BuildTrustLabel(&rows[i])
+		rows[i].TrustReason = BuildTrustReason(&rows[i])
+		rows[i].AsymmetryLabel = BuildAsymmetryLabel(&rows[i])
+		rows[i].AsymmetryReason = BuildAsymmetryReason(&rows[i])
+	}
+}
+
+func BuildPriorityLabel(s *model.LiveSnapshot, bestMint string) string {
+	if s.Mint == bestMint {
+		return "best_on_tape"
+	}
+	if s.EffectiveBuyers5m >= 3 || s.ClusteringRowStatus != "resolved" || s.MarketCapSol == 0 {
+		return "monitor_for_upgrade"
+	}
+	return "deprioritize"
+}
+
+func BuildOperatorFocus(s *model.LiveSnapshot) string {
+	if s.PriorityLabel == "best_on_tape" {
+		return "best available now"
+	}
+	if s.PriorityLabel == "monitor_for_upgrade" {
+		return "monitor for upgrade"
+	}
+	return "reject quickly"
+}
+
+func BuildRelativeSetupLabel(s *model.LiveSnapshot) string {
+	if s.PriorityLabel == "best_on_tape" && s.ActionabilityLabel == "not actionable" {
+		return "least bad on tape"
+	}
+	if s.PriorityLabel == "best_on_tape" {
+		return "current lead setup"
+	}
+	if s.PriorityLabel == "monitor_for_upgrade" && s.ClusteringRowStatus == "resolved" && s.EffectiveBuyers5m >= 3 {
+		return "cleaner than peers"
+	}
+	if s.PriorityLabel == "monitor_for_upgrade" && s.ClusteringRowStatus != "resolved" {
+		return "flow exists but trust is compromised"
+	}
+	if s.MarketCapSol == 0 {
+		return "structure incomplete"
+	}
+	if s.Engine.Layer0Reject {
+		return "execution-failed reject"
+	}
+	return "low-value reject"
+}
+
+func BuildTrustLabel(s *model.LiveSnapshot) string {
+	if s.Top10HolderPct >= 0.85 {
+		return "insider-controlled"
+	}
+	if s.ClusteringRowStatus != "resolved" {
+		return "compromised"
+	}
+	if s.FundingClusterRatio >= 0.30 {
+		return "compromised"
+	}
+	if s.ClusterCompressionRatio1m > 0 || s.ClusterCompressionRatio5m > 0 {
+		return "compromised"
+	}
+	return "organic"
+}
+
+func BuildTrustReason(s *model.LiveSnapshot) string {
+	if s.Top10HolderPct >= 0.85 {
+		return fmt.Sprintf("top10 concentration %.1f%%", s.Top10HolderPct*100)
+	}
+	if s.ClusteringRowStatus == "full_fallback" {
+		return "full fallback clustering trust degradation"
+	}
+	if s.ClusteringRowStatus == "partial_fallback" {
+		return "partial fallback clustering trust degradation"
+	}
+	if s.FundingClusterRatio >= 0.30 {
+		return fmt.Sprintf("funding cluster ratio %.2f", s.FundingClusterRatio)
+	}
+	if s.ClusterCompressionRatio1m > 0 || s.ClusterCompressionRatio5m > 0 {
+		return fmt.Sprintf("buyer compression 1m %.1f%% / 5m %.1f%%", s.ClusterCompressionRatio1m*100, s.ClusterCompressionRatio5m*100)
+	}
+	return "no major trust impairment detected"
+}
+
+func BuildAsymmetryLabel(s *model.LiveSnapshot) string {
+	if s.PriorityLabel == "best_on_tape" && s.ActionabilityLabel == "not actionable" {
+		return "best among weak tape"
+	}
+	if s.PriorityLabel == "best_on_tape" && s.ActionabilityLabel == "observe closely" {
+		return "closest to upgrade"
+	}
+	if s.ActionabilityLabel == "actionable now" {
+		return "live opportunity"
+	}
+	if s.TrustLabel == "insider-controlled" {
+		return "likely distribution trap"
+	}
+	if s.TrustLabel == "compromised" {
+		return "trust-degraded flow"
+	}
+	return "low asymmetry"
+}
+
+func BuildAsymmetryReason(s *model.LiveSnapshot) string {
+	if s.PriorityLabel == "best_on_tape" && s.ActionabilityLabel == "not actionable" {
+		return "this is the cleanest visible setup, but execution or trust still fails"
+	}
+	if s.PriorityLabel == "best_on_tape" && s.ActionabilityLabel == "observe closely" {
+		return "this needs the fewest changes to become interesting"
+	}
+	if s.ActionabilityLabel == "actionable now" {
+		return "this clears trust and execution thresholds better than peers"
+	}
+	if s.TrustLabel == "insider-controlled" {
+		return "concentration makes this likely exit liquidity"
+	}
+	if s.TrustLabel == "compromised" {
+		return "fallback or compression reduces trust in the apparent flow"
+	}
+	return "no material asymmetric edge versus peers"
+}
+
+func bestPriorityMint(rows []model.LiveSnapshot) string {
+	if len(rows) == 0 {
+		return ""
+	}
+	best := 0
+	for i := 1; i < len(rows); i++ {
+		if priorityLess(rows[best], rows[i]) {
+			best = i
+		}
+	}
+	return rows[best].Mint
+}
+
+func priorityLess(a model.LiveSnapshot, b model.LiveSnapshot) bool {
+	if a.ConfidenceScore != b.ConfidenceScore {
+		return a.ConfidenceScore < b.ConfidenceScore
+	}
+	if clusteringPriorityRank(a.ClusteringRowStatus) != clusteringPriorityRank(b.ClusteringRowStatus) {
+		return clusteringPriorityRank(a.ClusteringRowStatus) < clusteringPriorityRank(b.ClusteringRowStatus)
+	}
+	if a.AdversarialScore != b.AdversarialScore {
+		return a.AdversarialScore > b.AdversarialScore
+	}
+	if a.EffectiveBuyers5m != b.EffectiveBuyers5m {
+		return a.EffectiveBuyers5m < b.EffectiveBuyers5m
+	}
+	return impactForPriority(a.EstimatedImpactPct) > impactForPriority(b.EstimatedImpactPct)
+}
+
+func clusteringPriorityRank(status string) int {
+	switch status {
+	case "resolved":
+		return 3
+	case "partial_fallback":
+		return 2
+	case "full_fallback":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func impactForPriority(impact float64) float64 {
+	if impact <= 0 {
+		return math.MaxFloat64
+	}
+	return impact
 }
 
 func gateFailed(dec model.EngineDecision, gateID int) bool {

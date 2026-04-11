@@ -494,6 +494,22 @@ func (a *App) renderIndexHTML() string {
 	bestVerdictValue := ""
 	bestBlockerValue := ""
 	bestEvidenceValue := "Waiting for enough live structure to judge."
+	bestActionabilityValue := ""
+	bestPriorityValue := ""
+	bestFocusValue := ""
+	bestRelativeValue := ""
+	bestTrustValue := ""
+	bestTrustReasonValue := ""
+	bestAsymmetryLabelValue := ""
+	bestAsymmetryReasonValue := ""
+	bestVerdictLineValue := ""
+	bestBlockerLineValue := ""
+	bestWhyNowValue := ""
+	bestAnalogueValue := ""
+	bestOutcomeValue := ""
+	bestTimingValue := ""
+	bestUpgradeValue := ""
+	bestInvalidateValue := ""
 	bestMetaValue := ""
 	marketCopyValue := "Anyone can see motion. This terminal tries to distinguish organic emergence from compressed, fallback-affected, or structurally poisoned flow."
 	marketMetaValue := ""
@@ -503,6 +519,22 @@ func (a *App) renderIndexHTML() string {
 		page = strings.ReplaceAll(page, "__INITIAL_BEST_VERDICT__", html.EscapeString(bestVerdictValue))
 		page = strings.ReplaceAll(page, "__INITIAL_BEST_BLOCKER__", html.EscapeString(bestBlockerValue))
 		page = strings.ReplaceAll(page, "__INITIAL_BEST_EVIDENCE__", bestEvidenceValue)
+		page = strings.ReplaceAll(page, "__INITIAL_BEST_ACTIONABILITY__", bestActionabilityValue)
+		page = strings.ReplaceAll(page, "__INITIAL_BEST_PRIORITY__", bestPriorityValue)
+		page = strings.ReplaceAll(page, "__INITIAL_BEST_FOCUS__", bestFocusValue)
+		page = strings.ReplaceAll(page, "__INITIAL_BEST_RELATIVE__", bestRelativeValue)
+		page = strings.ReplaceAll(page, "__INITIAL_BEST_TRUST__", bestTrustValue)
+		page = strings.ReplaceAll(page, "__INITIAL_BEST_TRUST_REASON__", bestTrustReasonValue)
+		page = strings.ReplaceAll(page, "__INITIAL_BEST_ASYMMETRY_LABEL__", bestAsymmetryLabelValue)
+		page = strings.ReplaceAll(page, "__INITIAL_BEST_ASYMMETRY_REASON__", bestAsymmetryReasonValue)
+		page = strings.ReplaceAll(page, "__INITIAL_BEST_VERDICT_LINE__", bestVerdictLineValue)
+		page = strings.ReplaceAll(page, "__INITIAL_BEST_BLOCKER_LINE__", bestBlockerLineValue)
+		page = strings.ReplaceAll(page, "__INITIAL_BEST_WHY_NOW__", bestWhyNowValue)
+		page = strings.ReplaceAll(page, "__INITIAL_BEST_ANALOGUE__", bestAnalogueValue)
+		page = strings.ReplaceAll(page, "__INITIAL_BEST_OUTCOME__", bestOutcomeValue)
+		page = strings.ReplaceAll(page, "__INITIAL_BEST_TIMING__", bestTimingValue)
+		page = strings.ReplaceAll(page, "__INITIAL_BEST_UPGRADE__", bestUpgradeValue)
+		page = strings.ReplaceAll(page, "__INITIAL_BEST_INVALIDATE__", bestInvalidateValue)
 		page = strings.ReplaceAll(page, "__INITIAL_BEST_META__", bestMetaValue)
 		page = strings.ReplaceAll(page, "__INITIAL_MARKET_COPY__", html.EscapeString(marketCopyValue))
 		page = strings.ReplaceAll(page, "__INITIAL_MARKET_META__", marketMetaValue)
@@ -520,6 +552,22 @@ func (a *App) renderIndexHTML() string {
 			page = strings.ReplaceAll(page, "__INITIAL_BEST_VERDICT__", html.EscapeString(bestVerdictValue))
 			page = strings.ReplaceAll(page, "__INITIAL_BEST_BLOCKER__", html.EscapeString(bestBlockerValue))
 			page = strings.ReplaceAll(page, "__INITIAL_BEST_EVIDENCE__", bestEvidenceValue)
+			page = strings.ReplaceAll(page, "__INITIAL_BEST_ACTIONABILITY__", bestActionabilityValue)
+			page = strings.ReplaceAll(page, "__INITIAL_BEST_PRIORITY__", bestPriorityValue)
+			page = strings.ReplaceAll(page, "__INITIAL_BEST_FOCUS__", bestFocusValue)
+			page = strings.ReplaceAll(page, "__INITIAL_BEST_RELATIVE__", bestRelativeValue)
+			page = strings.ReplaceAll(page, "__INITIAL_BEST_TRUST__", bestTrustValue)
+			page = strings.ReplaceAll(page, "__INITIAL_BEST_TRUST_REASON__", bestTrustReasonValue)
+			page = strings.ReplaceAll(page, "__INITIAL_BEST_ASYMMETRY_LABEL__", bestAsymmetryLabelValue)
+			page = strings.ReplaceAll(page, "__INITIAL_BEST_ASYMMETRY_REASON__", bestAsymmetryReasonValue)
+			page = strings.ReplaceAll(page, "__INITIAL_BEST_VERDICT_LINE__", bestVerdictLineValue)
+			page = strings.ReplaceAll(page, "__INITIAL_BEST_BLOCKER_LINE__", bestBlockerLineValue)
+			page = strings.ReplaceAll(page, "__INITIAL_BEST_WHY_NOW__", bestWhyNowValue)
+			page = strings.ReplaceAll(page, "__INITIAL_BEST_ANALOGUE__", bestAnalogueValue)
+			page = strings.ReplaceAll(page, "__INITIAL_BEST_OUTCOME__", bestOutcomeValue)
+			page = strings.ReplaceAll(page, "__INITIAL_BEST_TIMING__", bestTimingValue)
+			page = strings.ReplaceAll(page, "__INITIAL_BEST_UPGRADE__", bestUpgradeValue)
+			page = strings.ReplaceAll(page, "__INITIAL_BEST_INVALIDATE__", bestInvalidateValue)
 			page = strings.ReplaceAll(page, "__INITIAL_BEST_META__", bestMetaValue)
 			page = strings.ReplaceAll(page, "__INITIAL_MARKET_COPY__", html.EscapeString(marketCopyValue))
 			page = strings.ReplaceAll(page, "__INITIAL_MARKET_META__", marketMetaValue)
@@ -530,16 +578,57 @@ func (a *App) renderIndexHTML() string {
 	}
 	bestHeadlineValue = bestHeadline(rows)
 	bestVerdictValue = bestVerdictText(rows)
-	bestBlockerValue = bestBlockerText(rows)
+	bestBlockerValue = ""
 	bestEvidenceValue = bestEvidenceText(rows)
+	bestActionabilityValue = bestActionabilityText(rows)
+	bestPriorityValue = bestPriorityText(rows)
+	if best := chooseBestSetupGo(rows); best != nil {
+		bestActionabilityValue = html.EscapeString(stringFieldMap(best, "actionability_label"))
+		bestPriorityValue = html.EscapeString(stringFieldMap(best, "priority_label"))
+		bestVerdictValue = html.EscapeString(stringFieldMap(best, "operator_verdict"))
+		bestBlockerValue = html.EscapeString(firstNonEmpty(
+			stringFieldMap(best, "dominant_blocker"),
+			stringFieldMap(best, "why_not_higher"),
+		))
+		bestTrustValue = html.EscapeString(stringFieldMap(best, "trust_label"))
+		bestTrustReasonValue = html.EscapeString(stringFieldMap(best, "trust_reason"))
+		bestAsymmetryLabelValue = html.EscapeString(stringFieldMap(best, "asymmetry_label"))
+		bestAsymmetryReasonValue = html.EscapeString(stringFieldMap(best, "asymmetry_reason"))
+		bestFocusValue = html.EscapeString(stringFieldMap(best, "operator_focus"))
+		bestRelativeValue = html.EscapeString(stringFieldMap(best, "relative_setup_label"))
+		bestWhyNowValue = html.EscapeString(stringFieldMap(best, "why_now"))
+		bestAnalogueValue = html.EscapeString(stringFieldMap(best, "historical_analogue_summary"))
+		bestOutcomeValue = html.EscapeString(stringFieldMap(best, "historical_outcome_band"))
+		bestTimingValue = html.EscapeString(stringFieldMap(best, "historical_time_to_outcome"))
+		bestUpgradeValue = html.EscapeString(stringFieldMap(best, "upgrade_triggers"))
+		bestInvalidateValue = html.EscapeString(stringFieldMap(best, "invalidate_triggers"))
+	}
+	bestVerdictLineValue = bestVerdictLineText(rows)
+	bestBlockerLineValue = bestBlockerLineText(rows)
 	bestMetaValue = bestMetaHTML(rows)
 	marketCopyValue = marketCopy(rows)
 	marketMetaValue = marketMetaHTML(rows)
 	initialBodyValue = renderInitialRows(rows)
 	page = strings.ReplaceAll(page, "__INITIAL_BEST_HEADLINE__", html.EscapeString(bestHeadlineValue))
-	page = strings.ReplaceAll(page, "__INITIAL_BEST_VERDICT__", html.EscapeString(bestVerdictValue))
-	page = strings.ReplaceAll(page, "__INITIAL_BEST_BLOCKER__", html.EscapeString(bestBlockerValue))
+	page = strings.ReplaceAll(page, "__INITIAL_BEST_ACTIONABILITY__", bestActionabilityValue)
+	page = strings.ReplaceAll(page, "__INITIAL_BEST_PRIORITY__", bestPriorityValue)
+	page = strings.ReplaceAll(page, "__INITIAL_BEST_VERDICT__", bestVerdictValue)
+	page = strings.ReplaceAll(page, "__INITIAL_BEST_BLOCKER__", bestBlockerValue)
+	page = strings.ReplaceAll(page, "__INITIAL_BEST_TRUST__", bestTrustValue)
+	page = strings.ReplaceAll(page, "__INITIAL_BEST_TRUST_REASON__", bestTrustReasonValue)
+	page = strings.ReplaceAll(page, "__INITIAL_BEST_ASYMMETRY_LABEL__", bestAsymmetryLabelValue)
+	page = strings.ReplaceAll(page, "__INITIAL_BEST_ASYMMETRY_REASON__", bestAsymmetryReasonValue)
+	page = strings.ReplaceAll(page, "__INITIAL_BEST_FOCUS__", bestFocusValue)
+	page = strings.ReplaceAll(page, "__INITIAL_BEST_RELATIVE__", bestRelativeValue)
+	page = strings.ReplaceAll(page, "__INITIAL_BEST_WHY_NOW__", bestWhyNowValue)
+	page = strings.ReplaceAll(page, "__INITIAL_BEST_ANALOGUE__", bestAnalogueValue)
+	page = strings.ReplaceAll(page, "__INITIAL_BEST_OUTCOME__", bestOutcomeValue)
+	page = strings.ReplaceAll(page, "__INITIAL_BEST_TIMING__", bestTimingValue)
+	page = strings.ReplaceAll(page, "__INITIAL_BEST_UPGRADE__", bestUpgradeValue)
+	page = strings.ReplaceAll(page, "__INITIAL_BEST_INVALIDATE__", bestInvalidateValue)
 	page = strings.ReplaceAll(page, "__INITIAL_BEST_EVIDENCE__", bestEvidenceValue)
+	page = strings.ReplaceAll(page, "__INITIAL_BEST_VERDICT_LINE__", bestVerdictLineValue)
+	page = strings.ReplaceAll(page, "__INITIAL_BEST_BLOCKER_LINE__", bestBlockerLineValue)
 	page = strings.ReplaceAll(page, "__INITIAL_BEST_META__", bestMetaValue)
 	page = strings.ReplaceAll(page, "__INITIAL_MARKET_COPY__", html.EscapeString(marketCopyValue))
 	page = strings.ReplaceAll(page, "__INITIAL_MARKET_META__", marketMetaValue)
@@ -549,16 +638,29 @@ func (a *App) renderIndexHTML() string {
 
 func renderInitialRows(rows []map[string]any) string {
 	if len(rows) == 0 {
-		return "<tr><td colspan='18' style='text-align:center;color:#8ea0c3;padding:32px'>No live signals yet — waiting for webhook activity</td></tr>"
+		return "<tr><td colspan='25' style='text-align:center;color:#8ea0c3;padding:32px'>No live signals yet — waiting for webhook activity</td></tr>"
 	}
 	var b strings.Builder
 	for _, s := range rows {
 		mint := stringFieldMap(s, "mint")
 		tokenHref := stringFieldMap(s, "execution_url")
 		decision := stringFieldMap(s, "decision")
+		priority := stringFieldMap(s, "priority_label")
+		operatorFocus := stringFieldMap(s, "operator_focus")
+		relativeSetup := stringFieldMap(s, "relative_setup_label")
+		trustLabel := stringFieldMap(s, "trust_label")
+		trustReason := stringFieldMap(s, "trust_reason")
+		asymmetryLabel := stringFieldMap(s, "asymmetry_label")
+		asymmetryReason := stringFieldMap(s, "asymmetry_reason")
 		verdict := stringFieldMap(s, "operator_verdict")
 		whyNow := stringFieldMap(s, "why_now")
 		blocker := firstNonEmpty(stringFieldMap(s, "dominant_blocker"), stringFieldMap(s, "why_not_higher"))
+		actionability := stringFieldMap(s, "actionability_label")
+		analogue := stringFieldMap(s, "historical_analogue_summary")
+		outcome := stringFieldMap(s, "historical_outcome_band")
+		timing := stringFieldMap(s, "historical_time_to_outcome")
+		upgrade := joinListFieldMap(s, "upgrade_triggers")
+		invalidate := joinListFieldMap(s, "invalidate_triggers")
 		state := stringFieldMap(s, "signal_state")
 		if state == "" {
 			state = "expired"
@@ -583,12 +685,7 @@ func renderInitialRows(rows []map[string]any) string {
 			decisionClass = "watch"
 		}
 		tier := visualTierGo(verdict, s)
-		rowClass := "row-risk"
-		if tier == "clean" {
-			rowClass = "row-strong"
-		} else if tier == "compromised" {
-			rowClass = "row-watch"
-		}
+		rowClass := rowClassForPriorityGo(priority)
 		qualityBadge := "<span class='badge poison'>low conviction</span>"
 		if tier == "clean" {
 			qualityBadge = "<span class='badge cleanflow'>clean</span>"
@@ -623,22 +720,33 @@ func renderInitialRows(rows []map[string]any) string {
 			shortMint = shortMint[:8] + "…"
 		}
 		fmt.Fprintf(&b,
-			"<tr class=\"live-row %s\"><td><span class='badge %s'>%s</span></td><td class=\"verdict-label\"><strong>%s</strong></td><td>%d</td><td><span class='badge %s'>%s</span></td><td class=\"exec-cell\"><div class='token-cell'><div class='token-meta'><div class='token-actions'><a class='token-link mono' href='%s' target='_blank' rel='noopener noreferrer'>%s</a><a href=\"%s\" class=\"gmgn-link exec-link\" target=\"_blank\" rel=\"noopener noreferrer\">EXECUTE [GMGN]</a></div><span class='token-sub'>%s</span></div></div></td><td><div class='metric-stack'><span>%d raw / %d eff</span><span class='metric-sub'>%s</span></div></td><td><div class='metric-stack'><span>%s%s</span><span class='metric-sub'>%s</span></div></td><td>%.2f/%.2f</td><td>%.2f</td><td>%.2f</td><td>%.2f</td><td>%.1f%%</td><td>%.1fm</td><td>%s</td><td>%s</td><td>%s</td><td class=\"why-now-cell\">%s</td><td class=\"blocker-cell\">%s</td></tr>",
+			"<tr class=\"live-row %s\"><td><span class='badge %s'>%s</span></td><td class=\"priority-cell\">%s</td><td class=\"actionability-cell\">%s</td><td class=\"trust-cell\">trust: %s</td><td class=\"trust-reason-cell\">%s</td><td class=\"asymmetry-label-cell\">%s</td><td class=\"asymmetry-reason-cell\">%s</td><td class=\"verdict-label\"><strong>%s</strong></td><td class=\"blocker-cell\">%s</td><td class=\"why-now-cell\">%s</td><td class=\"exec-cell\"><div class='token-cell'><div class='token-meta'><div class='token-actions'><a class='token-link mono' href='%s' target='_blank' rel='noopener noreferrer'>%s</a><a href=\"%s\" class=\"gmgn-link exec-link\" target=\"_blank\" rel=\"noopener noreferrer\">EXECUTE [GMGN]</a></div><span class='token-sub'>%s</span></div></div></td><td><div class='metric-stack'><span>%d raw / %d eff</span><span class='metric-sub'>%s</span></div></td><td><div class='metric-stack'><span>%s%s</span><span class='metric-sub'>%s</span></div></td><td class=\"liqmc-cell\">%s</td><td class=\"volmc-cell\">%s</td><td class=\"focus-cell\">%s</td><td class=\"relative-setup-cell\">%s</td><td class=\"analogue-cell\">analogue: %s</td><td class=\"outcome-cell\">outcome: %s</td><td class=\"timing-cell\">timing: %s</td><td class=\"upgrade-cell\">upgrade if: %s</td><td class=\"invalidate-cell\">invalidate if: %s</td><td>%d</td><td><span class='badge %s'>%s</span></td><td>%.2f/%.2f</td><td>%.2f</td><td>%.2f</td><td>%.2f</td><td>%.1f%%</td><td>%.1fm</td><td>%s</td></tr>",
 			rowClass,
 			decisionClass, html.EscapeString(decision),
+			html.EscapeString(priority),
+			html.EscapeString(actionability),
+			html.EscapeString(trustLabel),
+			html.EscapeString(trustReason),
+			html.EscapeString(asymmetryLabel),
+			html.EscapeString(asymmetryReason),
 			html.EscapeString(verdict),
-			int(floatFieldMap(s, "confidence_score")+0.5),
-			stateClassGo(state), html.EscapeString(state),
+			html.EscapeString(blocker),
+			html.EscapeString(whyNow),
 			html.EscapeString(tokenHref), html.EscapeString(shortMint), html.EscapeString(tokenHref), qualityBadge,
 			rawBuyers, effBuyers, html.EscapeString(buyerQualityLabelGo(s)),
 			html.EscapeString(clusterLabel), clusterBadge, html.EscapeString(clusterCompression),
+			html.EscapeString(liqMc), html.EscapeString(volMc),
+			html.EscapeString(operatorFocus),
+			html.EscapeString(relativeSetup),
+			html.EscapeString(analogue), html.EscapeString(outcome), html.EscapeString(timing),
+			html.EscapeString(upgrade), html.EscapeString(invalidate),
+			int(floatFieldMap(s, "confidence_score")+0.5),
+			stateClassGo(state), html.EscapeString(state),
 			floatFieldMap(s, "buy_sol_last_1m"), floatFieldMap(s, "sell_sol_last_1m"),
 			floatFieldMap(s, "buyer_acceleration"), floatFieldMap(s, "execution_penalty"), floatFieldMap(s, "adversarial_score"),
 			floatFieldMap(s, "estimated_impact_pct"),
 			floatFieldMap(s, "age_seconds")/60.0,
 			html.EscapeString(gatesCellGo(s)),
-			html.EscapeString(liqMc), html.EscapeString(volMc),
-			html.EscapeString(whyNow), html.EscapeString(blocker),
 		)
 	}
 	return b.String()
@@ -686,6 +794,14 @@ func bestMetaHTML(rows []map[string]any) string {
 		"<span class='badge neutral'>" + html.EscapeString(clusteringSurfaceLabelGo(best)) + "</span>"
 }
 
+func bestPriorityText(rows []map[string]any) string {
+	best := chooseBestSetupGo(rows)
+	if best == nil {
+		return ""
+	}
+	return html.EscapeString(stringFieldMap(best, "priority_label"))
+}
+
 func bestVerdictText(rows []map[string]any) string {
 	best := chooseBestSetupGo(rows)
 	if best == nil {
@@ -694,12 +810,84 @@ func bestVerdictText(rows []map[string]any) string {
 	return html.EscapeString(firstNonEmpty(stringFieldMap(best, "operator_verdict"), ""))
 }
 
+func bestVerdictLineText(rows []map[string]any) string {
+	best := chooseBestSetupGo(rows)
+	if best == nil {
+		return ""
+	}
+	return "verdict: " + html.EscapeString(firstNonEmpty(stringFieldMap(best, "operator_verdict"), ""))
+}
+
 func bestBlockerText(rows []map[string]any) string {
 	best := chooseBestSetupGo(rows)
 	if best == nil {
 		return ""
 	}
 	return "Blocker: " + html.EscapeString(firstNonEmpty(stringFieldMap(best, "dominant_blocker"), stringFieldMap(best, "why_not_higher"), ""))
+}
+
+func bestBlockerLineText(rows []map[string]any) string {
+	best := chooseBestSetupGo(rows)
+	if best == nil {
+		return ""
+	}
+	return "blocker: " + html.EscapeString(firstNonEmpty(stringFieldMap(best, "dominant_blocker"), stringFieldMap(best, "why_not_higher"), ""))
+}
+
+func bestWhyNowText(rows []map[string]any) string {
+	best := chooseBestSetupGo(rows)
+	if best == nil {
+		return ""
+	}
+	return "why now: " + html.EscapeString(stringFieldMap(best, "why_now"))
+}
+
+func bestActionabilityText(rows []map[string]any) string {
+	best := chooseBestSetupGo(rows)
+	if best == nil {
+		return ""
+	}
+	return html.EscapeString(stringFieldMap(best, "actionability_label"))
+}
+
+func bestAnalogueText(rows []map[string]any) string {
+	best := chooseBestSetupGo(rows)
+	if best == nil {
+		return ""
+	}
+	return "analogue: " + html.EscapeString(stringFieldMap(best, "historical_analogue_summary"))
+}
+
+func bestOutcomeText(rows []map[string]any) string {
+	best := chooseBestSetupGo(rows)
+	if best == nil {
+		return ""
+	}
+	return "outcome: " + html.EscapeString(stringFieldMap(best, "historical_outcome_band"))
+}
+
+func bestTimingText(rows []map[string]any) string {
+	best := chooseBestSetupGo(rows)
+	if best == nil {
+		return ""
+	}
+	return "timing: " + html.EscapeString(stringFieldMap(best, "historical_time_to_outcome"))
+}
+
+func bestUpgradeText(rows []map[string]any) string {
+	best := chooseBestSetupGo(rows)
+	if best == nil {
+		return ""
+	}
+	return "upgrade if: " + html.EscapeString(joinListFieldMap(best, "upgrade_triggers"))
+}
+
+func bestInvalidateText(rows []map[string]any) string {
+	best := chooseBestSetupGo(rows)
+	if best == nil {
+		return ""
+	}
+	return "invalidate if: " + html.EscapeString(joinListFieldMap(best, "invalidate_triggers"))
 }
 
 func marketCopy(rows []map[string]any) string {
@@ -765,6 +953,12 @@ func chooseBestSetupGo(rows []map[string]any) map[string]any {
 	if len(rows) == 0 {
 		return nil
 	}
+	for _, row := range rows {
+		priority := stringFieldMap(row, "priority_label")
+		if priority == "best_on_tape" || priority == "priority: best_on_tape" {
+			return row
+		}
+	}
 	best := rows[0]
 	bestScore := bestSetupScoreGo(best)
 	for _, row := range rows[1:] {
@@ -824,6 +1018,17 @@ func visualTierGo(verdict string, s map[string]any) string {
 		return "clean"
 	}
 	return "weak"
+}
+
+func rowClassForPriorityGo(priority string) string {
+	switch priority {
+	case "best_on_tape", "priority: best_on_tape":
+		return "row-best"
+	case "monitor_for_upgrade", "priority: monitor_for_upgrade":
+		return "row-upgrade"
+	default:
+		return "row-risk"
+	}
 }
 
 func visuallyCleanGo(s map[string]any) bool {
@@ -993,6 +1198,28 @@ func boolFieldMap(m map[string]any, key string) bool {
 	return false
 }
 
+func joinListFieldMap(m map[string]any, key string) string {
+	if m == nil {
+		return ""
+	}
+	switch v := m[key].(type) {
+	case string:
+		return v
+	case []string:
+		return strings.Join(v, " • ")
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+				out = append(out, s)
+			}
+		}
+		return strings.Join(out, " • ")
+	default:
+		return ""
+	}
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, v := range values {
 		if strings.TrimSpace(v) != "" {
@@ -1080,6 +1307,8 @@ small{color:#8ea0c3}
 .metric-stack{display:flex;flex-direction:column;gap:3px}
 .metric-sub{font-size:10px;color:#8196bb}
 .blocker-cell{background:rgba(110,42,42,.16)}
+.row-best{box-shadow:inset 5px 0 0 #7ef0b2;background:rgba(18,74,48,.30)}
+.row-upgrade{box-shadow:inset 5px 0 0 #ffd76a;background:rgba(70,54,12,.22)}
 .row-strong{box-shadow:inset 4px 0 0 #7ef0b2;background:rgba(18,42,30,.22)}
 .row-watch{box-shadow:inset 4px 0 0 #ffd76a;background:rgba(58,44,7,.14)}
 .row-risk{box-shadow:inset 4px 0 0 #f87171}
@@ -1135,14 +1364,29 @@ small{color:#8ea0c3}
 	<label style="font-size:13px"><input type="checkbox" id="showAllLive" checked> show expired/stale</label>
 </div>
 
-<div class="summary-grid" id="liveSummary" style="display:none">
-	<div class="panel" id="best-setup-panel">
+	<div class="summary-grid" id="liveSummary" style="display:none">
+		<div class="panel" id="best-setup-panel">
 		<h3>Best Current Setup</h3>
-		<div class="panel-headline" id="bestSetupHeadline">__INITIAL_BEST_HEADLINE__</div>
-		<div class="verdict" id="bestSetupVerdict">__INITIAL_BEST_VERDICT__</div>
-		<div class="blocker" id="bestSetupBlocker">__INITIAL_BEST_BLOCKER__</div>
-		<div class="evidence" id="bestSetupEvidence">__INITIAL_BEST_EVIDENCE__</div>
+		<div class="best-line actionability" id="bestSetupActionability">actionability: __INITIAL_BEST_ACTIONABILITY__</div>
+		<div class="best-line priority" id="bestSetupPriority">priority: __INITIAL_BEST_PRIORITY__</div>
+		<div class="best-line verdict-line" id="bestSetupVerdictLine">verdict: __INITIAL_BEST_VERDICT__</div>
+		<div class="best-line blocker-line" id="bestSetupBlockerLine">blocker: __INITIAL_BEST_BLOCKER__</div>
+		<div class="best-line trust-line" id="bestSetupTrust">trust: __INITIAL_BEST_TRUST__</div>
+		<div class="best-line trust-reason-line" id="bestSetupTrustReason">trust reason: __INITIAL_BEST_TRUST_REASON__</div>
+		<div class="best-line asymmetry-label" id="bestSetupAsymmetryLabel">asymmetry: __INITIAL_BEST_ASYMMETRY_LABEL__</div>
+		<div class="best-line asymmetry-reason" id="bestSetupAsymmetryReason">asymmetry reason: __INITIAL_BEST_ASYMMETRY_REASON__</div>
+		<div class="best-line focus-line" id="bestSetupFocus">focus: __INITIAL_BEST_FOCUS__</div>
+		<div class="best-line relative-line" id="bestSetupRelative">relative setup: __INITIAL_BEST_RELATIVE__</div>
+		<div class="best-line why-now-line" id="bestSetupWhyNow">why now: __INITIAL_BEST_WHY_NOW__</div>
+		<div class="best-line analogue" id="bestSetupAnalogue">analogue: __INITIAL_BEST_ANALOGUE__</div>
+		<div class="best-line outcome" id="bestSetupOutcome">outcome: __INITIAL_BEST_OUTCOME__</div>
+		<div class="best-line timing" id="bestSetupTiming">timing: __INITIAL_BEST_TIMING__</div>
+		<div class="best-line upgrade" id="bestSetupUpgrade">upgrade if: __INITIAL_BEST_UPGRADE__</div>
+		<div class="best-line invalidate" id="bestSetupInvalidate">invalidate if: __INITIAL_BEST_INVALIDATE__</div>
 		<div class="best-meta" id="bestSetupMeta">__INITIAL_BEST_META__</div>
+		<div class="verdict" id="bestSetupVerdict">__INITIAL_BEST_VERDICT__</div>
+		<div class="blocker" id="bestSetupBlocker">Blocker: __INITIAL_BEST_BLOCKER__</div>
+		<div class="evidence" id="bestSetupEvidence">__INITIAL_BEST_EVIDENCE__</div>
 	</div>
 	<div class="panel">
 		<div class="panel-title">Why This Tool Exists</div>
@@ -1168,26 +1412,39 @@ small{color:#8ea0c3}
 		</tr>
 	</thead>
 	<thead id="theadLive" style="display:none">
-		<tr>
-			<th>decision</th>
-			<th>verdict</th>
-			<th>conf</th>
-			<th>state</th>
-			<th>token</th>
-			<th title="raw buyers last 1m / effective after clustering">buyer quality</th>
-			<th title="clustering trust, compression, and row-level fallback">clustering</th>
-			<th title="buy SOL / sell SOL in last 1m">buy/sell 1m</th>
-			<th title="buyer acceleration ratio">accel</th>
-			<th title="execution quality [0-1]">exec</th>
-			<th title="adversarial score [0-1]">adv</th>
-			<th title="estimated price impact %">impact%</th>
-			<th>age</th>
-			<th title="7-gate engine: pass count / 7; L0 = layer-0 hard reject; ceiling label shown when engine caps the decision">gates</th>
-			<th title="Gate 1 — liquidity / market-cap ratio %; &lt;3% = avoid, 3-5% = watch floor, &gt;5% = eligible">liq/mc</th>
-			<th title="Gate 4 — volume / market-cap ratio %; &lt;2% = low conviction, &gt;5% = healthy">vol/mc</th>
-			<th title="why this is worth a glance now">why now</th>
-			<th title="dominant disqualifier / missing structure">disqualifier</th>
-		</tr>
+			<tr>
+				<th>decision</th>
+				<th>priority</th>
+				<th>actionability</th>
+				<th>trust</th>
+				<th>trust reason</th>
+				<th>asymmetry</th>
+				<th>asymmetry reason</th>
+				<th>verdict</th>
+				<th title="dominant disqualifier / missing structure">disqualifier</th>
+				<th title="why this is worth a glance now">why now</th>
+				<th>execution</th>
+				<th title="raw buyers last 1m / effective after clustering">buyer quality</th>
+				<th title="clustering trust, compression, and row-level fallback">clustering</th>
+				<th title="Gate 1 — liquidity / market-cap ratio %; &lt;3% = avoid, 3-5% = watch floor, &gt;5% = eligible">liq/mc</th>
+				<th title="Gate 4 — volume / market-cap ratio %; &lt;2% = low conviction, &gt;5% = healthy">vol/mc</th>
+				<th>focus</th>
+				<th>relative setup</th>
+				<th>analogue</th>
+				<th>outcome</th>
+				<th>timing</th>
+				<th>upgrade if</th>
+				<th>invalidate if</th>
+				<th>conf</th>
+				<th>state</th>
+				<th title="buy SOL / sell SOL in last 1m">buy/sell 1m</th>
+				<th title="buyer acceleration ratio">accel</th>
+				<th title="execution quality [0-1]">exec</th>
+				<th title="adversarial score [0-1]">adv</th>
+				<th title="estimated price impact %">impact%</th>
+				<th>age</th>
+				<th title="7-gate engine: pass count / 7; L0 = layer-0 hard reject; ceiling label shown when engine caps the decision">gates</th>
+			</tr>
 	</thead>
 	<tbody id="tbody">__INITIAL_TBODY__</tbody>
 </table>
@@ -1199,6 +1456,23 @@ small{color:#8ea0c3}
 // ---- config ----
 let CFG = {live_mode: false, ingestor_url: "", refresh_interval: 10};
 let liveTimer = null;
+let lastGoodRowsHTML = "";
+let lastGoodBestHTML = "";
+let lastGoodDisplayByMint = Object.create(null);
+const lastGoodDisplayFields = [
+	"liqmc-cell",
+	"volmc-cell",
+	"why-now-cell",
+	"blocker-cell",
+	"actionability-cell",
+	"priority-cell",
+	"trust-cell",
+	"trust-reason-cell",
+	"asymmetry-label-cell",
+	"asymmetry-reason-cell",
+	"focus-cell",
+	"relative-setup-cell",
+];
 
 async function init() {
 	try {
@@ -1292,6 +1566,7 @@ async function refreshCSVs() {
 
 // ---- LIVE mode ----
 async function loadLive() {
+	captureLastGoodFromDOM();
 	const showAll = document.getElementById("showAllLive") && document.getElementById("showAllLive").checked;
 	const actionableOnly = showAll ? "0" : "1";
 
@@ -1306,7 +1581,11 @@ async function loadLive() {
 		snapshots = await res.json();
 	} catch(e) {
 		updateStatusStrip(false, null, null, null);
-		setError("Live ingestor unreachable: " + e.message, 18);
+		keepLastGoodLive("Live refresh stale: " + e.message);
+		return;
+	}
+	if (!Array.isArray(snapshots)) {
+		keepLastGoodLive("Live refresh stale: invalid snapshot payload");
 		return;
 	}
 
@@ -1325,8 +1604,7 @@ async function loadLive() {
 		document.getElementById("rowsCard").textContent = "0";
 		document.getElementById("buyers1mCard").textContent = "0 / 0";
 		document.getElementById("accelCard").textContent = "0";
-		updateBestSetup(null, snapshots || []);
-		setEmpty("No live signals yet — waiting for webhook activity", 18);
+		keepLastGoodLive("Live refresh stale: empty row response");
 		return;
 	}
 
@@ -1337,11 +1615,11 @@ async function loadLive() {
 	document.getElementById("rowsCard").textContent = freshCount + "/" + snapshots.length;
 	document.getElementById("buyers1mCard").textContent = "B:" + buyCount + " R:" + readyCount;
 	document.getElementById("accelCard").textContent = cleanCount + "/" + snapshots.length;
-	updateBestSetup(chooseBestSetup(snapshots), snapshots);
 
 	const tbody = document.getElementById("tbody");
-	tbody.innerHTML = "";
+	const renderedRows = [];
 
+	try {
 	for (const s of snapshots) {
 		const ageMin = (s.age_seconds / 60).toFixed(1);
 		const accel = Number(s.buyer_acceleration || 0).toFixed(2);
@@ -1405,7 +1683,22 @@ async function loadLive() {
 		// Gate 1 = liq/mc ratio %, Gate 4 = vol/mc ratio %
 		const g1 = gates.find(g => g.gate_id === 1) || {};
 		const g4 = gates.find(g => g.gate_id === 4) || {};
-		const verdict = s.operator_verdict;
+			const verdict = s.operator_verdict;
+			const priority = stableDisplayValue(mint, "priority-cell", s.priority_label);
+			const operatorFocus = stableDisplayValue(mint, "focus-cell", s.operator_focus);
+			const relativeSetup = stableDisplayValue(mint, "relative-setup-cell", s.relative_setup_label);
+			const trustLabel = s.trust_label;
+			const trustReason = s.trust_reason;
+			const trustText = stableDisplayValue(mint, "trust-cell", trustLabel ? "trust: " + trustLabel : "");
+			const trustReasonText = stableDisplayValue(mint, "trust-reason-cell", trustReason);
+			const asymmetryLabel = stableDisplayValue(mint, "asymmetry-label-cell", s.asymmetry_label);
+			const asymmetryReason = stableDisplayValue(mint, "asymmetry-reason-cell", s.asymmetry_reason);
+			const actionability = stableDisplayValue(mint, "actionability-cell", s.actionability_label);
+			const analogue = s.historical_analogue_summary;
+			const outcome = s.historical_outcome_band;
+			const timing = s.historical_time_to_outcome;
+		const upgrade = listText(s.upgrade_triggers);
+		const invalidate = listText(s.invalidate_triggers);
 		const fullWhyNot = [s.dominant_blocker, s.why_not_higher, (s.reasons || []).join(" | "), gateReasonList(eng)].filter(Boolean).join(" | ");
 		const clusterTrust = clusteringSurfaceLabel(s);
 		const clusterCompression = clusterPct > 0 ? clusterPct + "% compressed" : "0% compressed";
@@ -1418,8 +1711,8 @@ async function loadLive() {
 			: qualityTier === "compromised"
 				? "<span class='badge partial'>compromised</span>"
 				: "<span class='badge poison'>low conviction</span>";
-		const liqMcPct = (g1.value != null && !g1.skipped) ? Number(g1.value).toFixed(1) + "%" : compactMissingStructure(s.market_cap_reason || g1.reason || "market cap unavailable");
-		const volMcPct = (g4.value != null && !g4.skipped) ? Number(g4.value).toFixed(1) + "%" : compactMissingStructure(s.market_cap_reason || g4.reason || "market cap unavailable");
+			const liqMcPct = stableDisplayValue(mint, "liqmc-cell", (g1.value != null && !g1.skipped) ? Number(g1.value).toFixed(1) + "%" : compactMissingStructure(s.market_cap_reason || g1.reason || "market cap unavailable"));
+			const volMcPct = stableDisplayValue(mint, "volmc-cell", (g4.value != null && !g4.skipped) ? Number(g4.value).toFixed(1) + "%" : compactMissingStructure(s.market_cap_reason || g4.reason || "market cap unavailable"));
 
 		const g1Style = g1.passed ? "color:#7ef0b2" : g1.skipped ? "color:#5a7090" : "color:#f87171";
 		const g4Style = g4.passed ? "color:#7ef0b2" : g4.skipped ? "color:#5a7090" : "color:#f87171";
@@ -1446,31 +1739,56 @@ async function loadLive() {
 		const tr = document.createElement("tr");
 		tr.setAttribute("data-actionable", s.is_actionable ? "1" : "0");
 		if (!s.is_actionable) tr.style.opacity = "0.45";
-		if (qualityTier === "clean") tr.className = "row-strong";
-		else if (qualityTier === "compromised") tr.className = "row-watch";
-		else tr.className = "row-risk";
+		tr.className = rowClassForPriority(priority);
 
-		tr.innerHTML =
-			"<td><span class='badge " + decClass + "'>" + dec + "</span></td>" +
-			"<td><span class='badge verdict-label " + tierBadgeClass(qualityTier) + "' title='" + escAttr(verdict) + "'>" + esc(verdict) + "</span></td>" +
-			"<td style='" + confStyle + ";font-weight:700'>" + conf + "</td>" +
-			"<td><span class='badge " + stateClass + "'>" + state + "</span></td>" +
-			"<td><div class='token-cell'><div class='token-meta'><div class='token-actions'><a class='token-link mono' href='" + tokenHref + "' target='_blank' rel='noopener noreferrer'>" + mint.slice(0, 8) + "…</a><a class='exec-link' href='" + tokenHref + "' target='_blank' rel='noopener noreferrer'>GMGN</a></div><span class='token-sub'>" + qualityBadge + "</span></div></div></td>" +
-			"<td style='" + buyersStyle + "' title='raw/effective buyers after clustering'><div class='metric-stack'><span>" + rawBuyers + " raw / " + effBuyers + " eff</span><span class='metric-sub'>" + buyerQualityLabel(s) + "</span></div></td>" +
-			"<td title='cluster row status: " + escAttr(rowClusterStatus) + "; compression=" + clusterCompression + "'><div class='metric-stack'><span>" + clusterTrust + clusterFallbackBadge + "</span><span class='metric-sub'>" + clusterCompression + "</span></div></td>" +
-			"<td style='" + flowStyle + "'>" + buySol1m + "/" + sellSol1m + "</td>" +
-			"<td style='" + accelStyle + "'>" + accel + "</td>" +
-			"<td style='" + execStyle + "'>" + exec + "</td>" +
-			"<td style='" + advStyle + "'>" + adv + "</td>" +
-			"<td style='" + impactStyle + "'>" + impactPct + "%</td>" +
-			"<td class='dim'>" + ageMin + "m</td>" +
-			"<td>" + gatesCell + "</td>" +
-			"<td style='" + g1Style + "' title='" + g1Title + "'>" + liqMcPct + "</td>" +
-			"<td style='" + g4Style + "' title='" + g4Title + "'>" + volMcPct + "</td>" +
-			"<td class=\"why-now-cell\">" + esc(s.why_now) + "</td>" +
-			"<td class=\"blocker-cell\">" + esc(s.dominant_blocker || s.why_not_higher) + "</td>";
-		tbody.appendChild(tr);
+			tr.innerHTML =
+				"<td><span class='badge " + decClass + "'>" + dec + "</span></td>" +
+				"<td class=\"priority-cell\">" + esc(priority) + "</td>" +
+				"<td class=\"actionability-cell\">" + esc(actionability) + "</td>" +
+				"<td class=\"trust-cell\">" + esc(trustText) + "</td>" +
+				"<td class=\"trust-reason-cell\">" + esc(trustReasonText) + "</td>" +
+				"<td class=\"asymmetry-label-cell\">" + esc(asymmetryLabel) + "</td>" +
+				"<td class=\"asymmetry-reason-cell\">" + esc(asymmetryReason) + "</td>" +
+				"<td class=\"verdict-label\"><strong>" + esc(verdict) + "</strong></td>" +
+				"<td class=\"blocker-cell\">" + esc(stableDisplayValue(mint, "blocker-cell", s.dominant_blocker || s.why_not_higher)) + "</td>" +
+				"<td class=\"why-now-cell\">" + esc(stableDisplayValue(mint, "why-now-cell", s.why_now)) + "</td>" +
+				"<td class=\"exec-cell\"><div class='token-cell'><div class='token-meta'><div class='token-actions'><a class='token-link mono' href='" + tokenHref + "' target='_blank' rel='noopener noreferrer'>" + mint.slice(0, 8) + "…</a><a class='gmgn-link exec-link' href='" + tokenHref + "' target='_blank' rel='noopener noreferrer'>EXECUTE [GMGN]</a></div><span class='token-sub'>" + qualityBadge + "</span></div></div></td>" +
+				"<td style='" + buyersStyle + "' title='raw/effective buyers after clustering'><div class='metric-stack'><span>" + rawBuyers + " raw / " + effBuyers + " eff</span><span class='metric-sub'>" + buyerQualityLabel(s) + "</span></div></td>" +
+				"<td title='cluster row status: " + escAttr(rowClusterStatus) + "; compression=" + clusterCompression + "'><div class='metric-stack'><span>" + clusterTrust + clusterFallbackBadge + "</span><span class='metric-sub'>" + clusterCompression + "</span></div></td>" +
+				"<td class=\"liqmc-cell\" style='" + g1Style + "' title='" + g1Title + "'>" + liqMcPct + "</td>" +
+				"<td class=\"volmc-cell\" style='" + g4Style + "' title='" + g4Title + "'>" + volMcPct + "</td>" +
+				"<td class=\"focus-cell\">" + esc(operatorFocus) + "</td>" +
+				"<td class=\"relative-setup-cell\">" + esc(relativeSetup) + "</td>" +
+				"<td class=\"analogue-cell\">analogue: " + esc(analogue) + "</td>" +
+				"<td class=\"outcome-cell\">outcome: " + esc(outcome) + "</td>" +
+				"<td class=\"timing-cell\">timing: " + esc(timing) + "</td>" +
+				"<td class=\"upgrade-cell\">upgrade if: " + esc(upgrade) + "</td>" +
+				"<td class=\"invalidate-cell\">invalidate if: " + esc(invalidate) + "</td>" +
+				"<td style='" + confStyle + ";font-weight:700'>" + conf + "</td>" +
+				"<td><span class='badge " + stateClass + "'>" + state + "</span></td>" +
+				"<td style='" + flowStyle + "'>" + buySol1m + "/" + sellSol1m + "</td>" +
+				"<td style='" + accelStyle + "'>" + accel + "</td>" +
+				"<td style='" + execStyle + "'>" + exec + "</td>" +
+				"<td style='" + advStyle + "'>" + adv + "</td>" +
+				"<td style='" + impactStyle + "'>" + impactPct + "%</td>" +
+				"<td class='dim'>" + ageMin + "m</td>" +
+				"<td>" + gatesCell + "</td>";
+		renderedRows.push(tr.outerHTML);
 	}
+	} catch(e) {
+		keepLastGoodLive("Live refresh stale: render failed: " + e.message);
+		return;
+	}
+	if (renderedRows.length === 0) {
+		keepLastGoodLive("Live refresh stale: no renderable rows");
+		return;
+	}
+	tbody.innerHTML = renderedRows.join("");
+	captureDisplayCacheFromRows(tbody.querySelectorAll("tr.live-row"));
+	updateBestSetup(chooseBestSetup(snapshots), snapshots);
+	lastGoodRowsHTML = tbody.innerHTML;
+	const bestPanel = document.getElementById("best-setup-panel");
+	if (bestPanel) lastGoodBestHTML = bestPanel.innerHTML;
 }
 
 function updateStatusStrip(ok, pollTime, snapshots, healthData) {
@@ -1536,6 +1854,73 @@ function td_badge(val, cls) {
 		: "<td><span class='badge no'>no</span></td>";
 }
 
+function captureLastGoodFromDOM() {
+	const tbody = document.getElementById("tbody");
+	const bestPanel = document.getElementById("best-setup-panel");
+	if (tbody) {
+		captureDisplayCacheFromRows(tbody.querySelectorAll("tr.live-row"));
+	}
+	if (tbody && !lastGoodRowsHTML && tbody.querySelector(".live-row")) {
+		lastGoodRowsHTML = tbody.innerHTML;
+	}
+	if (bestPanel && !lastGoodBestHTML && bestPanel.textContent.includes("Best Current Setup")) {
+		lastGoodBestHTML = bestPanel.innerHTML;
+	}
+}
+
+function captureDisplayCacheFromRows(rows) {
+	for (const row of rows || []) {
+		const mint = mintFromRenderedRow(row);
+		if (!mint) continue;
+		for (const field of lastGoodDisplayFields) {
+			const cell = row.querySelector("." + field);
+			if (cell) rememberDisplayField(mint, field, cell.textContent);
+		}
+	}
+}
+
+function mintFromRenderedRow(row) {
+	const link = row && row.querySelector ? row.querySelector("a.exec-link[href*='gmgn.ai/sol/token/']") : null;
+	if (!link) return "";
+	const href = link.getAttribute("href") || "";
+	const marker = "/token/";
+	const idx = href.indexOf(marker);
+	return idx >= 0 ? href.slice(idx + marker.length).trim() : "";
+}
+
+function rememberDisplayField(mint, field, value) {
+	if (!mint || !field) return;
+	const text = String(value == null ? "" : value).trim();
+	if (!text) return;
+	if (!lastGoodDisplayByMint[mint]) lastGoodDisplayByMint[mint] = Object.create(null);
+	lastGoodDisplayByMint[mint][field] = text;
+}
+
+function stableDisplayValue(mint, field, value) {
+	const text = String(value == null ? "" : value).trim();
+	if (text) {
+		rememberDisplayField(mint, field, text);
+		return text;
+	}
+	const prior = mint && lastGoodDisplayByMint[mint] ? lastGoodDisplayByMint[mint][field] : "";
+	return prior || "";
+}
+
+function keepLastGoodLive(msg) {
+	const tbody = document.getElementById("tbody");
+	const bestPanel = document.getElementById("best-setup-panel");
+	if (tbody && lastGoodRowsHTML) {
+		tbody.innerHTML = lastGoodRowsHTML;
+	}
+	if (bestPanel && lastGoodBestHTML) {
+		bestPanel.innerHTML = lastGoodBestHTML;
+	}
+	const note = document.getElementById("tableNote");
+	if (note) {
+		note.textContent = msg + "; keeping last good snapshot on screen.";
+	}
+}
+
 function setEmpty(msg, cols) {
 	const tbody = document.getElementById("tbody");
 	tbody.innerHTML = "<tr><td colspan='" + cols +
@@ -1553,6 +1938,12 @@ function esc(s) {
 }
 function escAttr(s) {
 	return String(s).replace(/&/g,"&amp;").replace(/'/g,"&#39;").replace(/"/g,"&quot;");
+}
+
+function listText(values) {
+	if (typeof values === "string") return values;
+	if (!Array.isArray(values)) return "";
+	return values.filter(Boolean).join(" • ");
 }
 
 function gateReasonList(eng) {
@@ -1597,8 +1988,16 @@ function visuallyClean(s) {
 	return visualTier(s.operator_verdict, s) !== "weak";
 }
 
+function rowClassForPriority(priority) {
+	if (priority === "best_on_tape" || priority === "priority: best_on_tape") return "row-best";
+	if (priority === "monitor_for_upgrade" || priority === "priority: monitor_for_upgrade") return "row-upgrade";
+	return "row-risk";
+}
+
 function chooseBestSetup(rows) {
 	if (!rows || rows.length === 0) return null;
+	const backendBest = rows.find(x => x.priority_label === "best_on_tape" || x.priority_label === "priority: best_on_tape");
+	if (backendBest) return backendBest;
 	const scored = [...rows].sort((a, b) => bestSetupScore(b) - bestSetupScore(a));
 	return scored[0] || null;
 }
@@ -1624,6 +2023,22 @@ function updateBestSetup(best, rows) {
 	const verdictEl = document.getElementById("bestSetupVerdict");
 	const blockerEl = document.getElementById("bestSetupBlocker");
 	const evidenceEl = document.getElementById("bestSetupEvidence");
+	const actionabilityEl = document.getElementById("bestSetupActionability");
+	const priorityEl = document.getElementById("bestSetupPriority");
+	const focusEl = document.getElementById("bestSetupFocus");
+	const relativeEl = document.getElementById("bestSetupRelative");
+	const trustEl = document.getElementById("bestSetupTrust");
+	const trustReasonEl = document.getElementById("bestSetupTrustReason");
+	const asymmetryLabelEl = document.getElementById("bestSetupAsymmetryLabel");
+	const asymmetryReasonEl = document.getElementById("bestSetupAsymmetryReason");
+	const verdictLineEl = document.getElementById("bestSetupVerdictLine");
+	const blockerLineEl = document.getElementById("bestSetupBlockerLine");
+	const whyNowLineEl = document.getElementById("bestSetupWhyNow");
+	const analogueEl = document.getElementById("bestSetupAnalogue");
+	const outcomeEl = document.getElementById("bestSetupOutcome");
+	const timingEl = document.getElementById("bestSetupTiming");
+	const upgradeEl = document.getElementById("bestSetupUpgrade");
+	const invalidateEl = document.getElementById("bestSetupInvalidate");
 	const meta = document.getElementById("bestSetupMeta");
 	const marketCopy = document.getElementById("marketReadCopy");
 	const marketMeta = document.getElementById("marketReadMeta");
@@ -1651,10 +2066,26 @@ function updateBestSetup(best, rows) {
 	}
 
 	if (!best) {
-		headline.textContent = "No high-conviction setup right now";
-		verdictEl.textContent = "";
-		blockerEl.textContent = "";
-		evidenceEl.textContent = "Waiting for enough live structure to judge.";
+		if (headline) headline.textContent = "No high-conviction setup right now";
+		if (verdictEl) verdictEl.textContent = "";
+		if (blockerEl) blockerEl.textContent = "";
+		if (evidenceEl) evidenceEl.textContent = "Waiting for enough live structure to judge.";
+		actionabilityEl.textContent = "";
+		priorityEl.textContent = "";
+		focusEl.textContent = "";
+		relativeEl.textContent = "";
+		trustEl.textContent = "";
+		trustReasonEl.textContent = "";
+		asymmetryLabelEl.textContent = "";
+		asymmetryReasonEl.textContent = "";
+		verdictLineEl.textContent = "";
+		blockerLineEl.textContent = "";
+		whyNowLineEl.textContent = "";
+		analogueEl.textContent = "";
+		outcomeEl.textContent = "";
+		timingEl.textContent = "";
+		upgradeEl.textContent = "";
+		invalidateEl.textContent = "";
 		return;
 	}
 
@@ -1662,18 +2093,47 @@ function updateBestSetup(best, rows) {
 	const whyNow = best.why_now;
 	const whyNot = best.dominant_blocker || best.why_not_higher;
 	const verdict = best.operator_verdict;
+	const actionability = best.actionability_label;
+	const priority = best.priority_label;
+	const operatorFocus = best.operator_focus;
+	const relativeSetup = best.relative_setup_label;
+	const trustLabel = best.trust_label;
+	const trustReason = best.trust_reason;
+	const asymmetryLabel = best.asymmetry_label;
+	const asymmetryReason = best.asymmetry_reason;
+	const analogue = best.historical_analogue_summary;
+	const outcome = best.historical_outcome_band;
+	const timing = best.historical_time_to_outcome;
+	const upgrade = listText(best.upgrade_triggers);
+	const invalidate = listText(best.invalidate_triggers);
 	const shortMint = (best.mint || "").slice(0, 8) + "…";
 
 	if (tier === "clean" && best.is_actionable) {
-		headline.textContent = shortMint + " is the cleanest live setup";
+		if (headline) headline.textContent = shortMint + " is the cleanest live setup";
 	} else if (best.decision === "WATCH" || best.decision === "READY" || best.decision === "BUY") {
-		headline.textContent = shortMint + " is the best available, not a free pass";
+		if (headline) headline.textContent = shortMint + " is the best available, not a free pass";
 	} else {
-		headline.textContent = "Best available, but still low-conviction";
+		if (headline) headline.textContent = "Best available, but still low-conviction";
 	}
-	verdictEl.textContent = verdict;
-	blockerEl.textContent = "Blocker: " + whyNot;
-	evidenceEl.textContent = whyNow;
+	if (verdictEl) verdictEl.textContent = verdict;
+	if (blockerEl) blockerEl.textContent = "Blocker: " + whyNot;
+	if (evidenceEl) evidenceEl.textContent = whyNow;
+	actionabilityEl.textContent = "actionability: " + actionability;
+	priorityEl.textContent = "priority: " + priority;
+	verdictLineEl.textContent = "verdict: " + verdict;
+	blockerLineEl.textContent = "blocker: " + whyNot;
+	trustEl.textContent = "trust: " + trustLabel;
+	trustReasonEl.textContent = "trust reason: " + trustReason;
+	asymmetryLabelEl.textContent = "asymmetry: " + asymmetryLabel;
+	asymmetryReasonEl.textContent = "asymmetry reason: " + asymmetryReason;
+	focusEl.textContent = "focus: " + operatorFocus;
+	relativeEl.textContent = "relative setup: " + relativeSetup;
+	whyNowLineEl.textContent = "why now: " + whyNow;
+	analogueEl.textContent = "analogue: " + analogue;
+	outcomeEl.textContent = "outcome: " + outcome;
+	timingEl.textContent = "timing: " + timing;
+	upgradeEl.textContent = "upgrade if: " + upgrade;
+	invalidateEl.textContent = "invalidate if: " + invalidate;
 
 	meta.innerHTML =
 		"<span class='badge " + decisionBadgeClass(best.decision) + "'>" + (best.decision || "?") + "</span>" +

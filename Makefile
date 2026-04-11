@@ -323,17 +323,11 @@ endef
 define _check_port
 	@{ \
 	  port="$(1)"; svc="$(2)"; \
-	  occupant=$$(lsof -iTCP:$$port -sTCP:LISTEN -n -P 2>/dev/null | awk 'NR>1 {print $$2}' | head -1); \
-	  if [ -z "$$occupant" ]; then exit 0; fi; \
-	  owned=0; \
-	  for pidfile in .pids/ingestor.pid .pids/dashboard.pid; do \
-	    [ -f "$$pidfile" ] && [ "$$(cat $$pidfile 2>/dev/null)" = "$$occupant" ] && owned=1; \
-	  done; \
-	  if [ "$$owned" = "0" ]; then \
-	    echo "FAIL: port $$port is occupied by foreign PID $$occupant — cannot start $$svc"; \
-	    echo "      Kill it with: kill $$occupant"; \
-	    exit 1; \
-	  fi; \
+	  listener=$$(lsof -iTCP:$$port -sTCP:LISTEN -n -P 2>/dev/null | awk 'NR>1 {print; exit}'); \
+	  if [ -z "$$listener" ]; then exit 0; fi; \
+	  echo "FAIL: port $$port is occupied before starting $$svc"; \
+	  echo "LISTENER: $$listener"; \
+	  exit 1; \
 	}
 endef
 
@@ -367,6 +361,9 @@ _start_services:
 	@echo "Building binaries..."
 	@go build -o .pids/ingestor_bin  ./cmd/ingestor
 	@go build -o .pids/dashboard_bin ./cmd/dashboard
+	@echo "Killing stale project root binaries..."
+	@pkill -9 -f "/Users/ddff/Downloads/memecoin_scorer/dashboard" || true
+	@pkill -9 -f "/Users/ddff/Downloads/memecoin_scorer/ingestor" || true
 	@echo "Checking port $(_IPORT) (ingestor)..."
 	$(call _check_port,$(_IPORT),ingestor)
 	@echo "Checking port $(_DPORT) (dashboard)..."
@@ -396,6 +393,24 @@ _start_services:
 	$(call _wait_healthz,ingestor,http://localhost:$(_IPORT),logs/ingestor.log,20)
 	@echo "Waiting for dashboard /healthz..."
 	$(call _wait_healthz,dashboard,http://localhost:$(_DPORT),logs/dashboard.log,20)
+	@{ \
+	  ingestor_listener=$$(lsof -tiTCP:$(_IPORT) -sTCP:LISTEN -n -P 2>/dev/null | head -1); \
+	  dashboard_listener=$$(lsof -tiTCP:$(_DPORT) -sTCP:LISTEN -n -P 2>/dev/null | head -1); \
+	  ingestor_pid=$$(cat .pids/ingestor.pid 2>/dev/null || true); \
+	  dashboard_pid=$$(cat .pids/dashboard.pid 2>/dev/null || true); \
+	  echo "  listener PID on $(_IPORT): $$ingestor_listener"; \
+	  echo "  listener PID on $(_DPORT): $$dashboard_listener"; \
+	  echo "  .pids/ingestor.pid: $$ingestor_pid"; \
+	  echo "  .pids/dashboard.pid: $$dashboard_pid"; \
+	  if [ "$$ingestor_listener" != "$$ingestor_pid" ]; then \
+	    echo "FAIL: ingestor listener PID does not match .pids/ingestor.pid"; \
+	    exit 1; \
+	  fi; \
+	  if [ "$$dashboard_listener" != "$$dashboard_pid" ]; then \
+	    echo "FAIL: dashboard listener PID does not match .pids/dashboard.pid"; \
+	    exit 1; \
+	  fi; \
+	}
 	@echo ""
 	@echo "  Ingestor:  http://localhost:$(_IPORT)"
 	@echo "  Dashboard: http://localhost:$(_DPORT)"

@@ -49,6 +49,64 @@ if viol_why or viol_verdict or viol_blocker or viol_exec:
     sys.exit(1)
 PY
 curl -s http://localhost:8090 > /tmp/dashboard.html
+python3 - <<'PY'
+import json, sys
+rows=json.load(open('/tmp/live.json'))
+print("RUNTIME_ROWS", len(rows))
+if len(rows) == 0:
+    raise SystemExit(1)
+PY
+if [ ! -s /tmp/dashboard.html ]; then
+    echo "FAIL: dashboard HTML is zero bytes"
+    exit 1
+fi
+python3 - <<'PY'
+html=open('/tmp/dashboard.html').read()
+required = [
+    'id="bestSetupActionability"',
+    'id="bestSetupPriority"',
+    'id="bestSetupVerdictLine"',
+    'id="bestSetupBlockerLine"',
+    'id="bestSetupTrust"',
+    'id="bestSetupTrustReason"',
+    'id="bestSetupAsymmetryLabel"',
+    'id="bestSetupAsymmetryReason"',
+    'id="bestSetupFocus"',
+    'id="bestSetupRelative"',
+    'id="bestSetupWhyNow"',
+    'id="bestSetupAnalogue"',
+    'id="bestSetupOutcome"',
+    'id="bestSetupTiming"',
+    'id="bestSetupUpgrade"',
+    'id="bestSetupInvalidate"',
+]
+missing=[x for x in required if x not in html]
+print("BEST_PANEL_IDS_MISSING", len(missing), missing)
+if missing:
+    raise SystemExit(1)
+PY
+python3 - <<'PY'
+import re, sys
+html=open('/tmp/dashboard.html').read()
+checks = {
+    "actionability": r'id="bestSetupActionability">actionability:\s*([^<]*)<',
+    "priority": r'id="bestSetupPriority">priority:\s*([^<]*)<',
+    "verdict": r'id="bestSetupVerdictLine">verdict:\s*([^<]*)<',
+    "blocker": r'id="bestSetupBlockerLine">blocker:\s*([^<]*)<',
+    "trust": r'id="bestSetupTrust">trust:\s*([^<]*)<',
+    "focus": r'id="bestSetupFocus">focus:\s*([^<]*)<',
+}
+bad=[]
+for k,p in checks.items():
+    m=re.search(p, html)
+    val=(m.group(1).strip() if m else "")
+    print(k.upper(), repr(val))
+    if not val:
+        bad.append(k)
+print("BLANK_FIELDS", bad)
+if bad:
+    raise SystemExit(1)
+PY
 grep -nE "Best Current Setup|Structural Quality Filter|exec-link|verdict-label|gmgn.ai|why-now|blocker-cell|partial fallback|full fallback|resolved|compressed" /tmp/dashboard.html
 python3 - <<'PY'
 import json, sys
