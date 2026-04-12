@@ -1,0 +1,703 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anti-Bullshit Live Terminal</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(circle at top,#16223c 0%,#0b1020 38%,#070b16 100%);color:#e8ecf3;margin:0;padding:20px}
+h1{margin:0 0 4px 0;font-size:28px}
+.hero{display:flex;flex-wrap:wrap;justify-content:space-between;gap:16px;align-items:flex-end;margin-bottom:14px}
+.hero-copy{max-width:860px}
+.eyebrow{color:#89a4d8;font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;margin-bottom:8px}
+.subhead{color:#c6d4ee;font-size:15px;line-height:1.5;max-width:920px}
+.purpose{margin-top:10px;color:#8ea0c3;font-size:13px;max-width:920px}
+.mode-badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700;margin-bottom:12px}
+.mode-live{background:#153d2b;color:#7ef0b2}
+.mode-offline{background:#2a2230;color:#b9a8c9}
+
+/* Status strip */
+.status-strip{display:flex;flex-wrap:wrap;gap:16px;align-items:center;background:#0d1526;border:1px solid #1e2f4a;border-radius:10px;padding:10px 16px;margin-bottom:12px;font-size:13px}
+.status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
+.dot-ok{background:#7ef0b2}
+.dot-warn{background:#ffd76a}
+.dot-err{background:#f87171}
+
+.controls{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:12px;align-items:center}
+button,select,label{font-size:14px}
+button{background:#1d4ed8;color:white;border:0;border-radius:10px;padding:8px 14px;cursor:pointer}
+button.secondary{background:#1f2937}
+button:disabled{opacity:.45;cursor:default}
+.summary-grid{display:grid;grid-template-columns:minmax(320px,1.3fr) minmax(280px,.9fr);gap:12px;margin-bottom:12px}
+.panel{background:linear-gradient(180deg,rgba(18,26,43,.96),rgba(12,19,33,.98));border:1px solid #23304d;border-radius:16px;padding:14px}
+.panel-title{font-size:11px;color:#8ea0c3;text-transform:uppercase;letter-spacing:.12em;font-weight:800;margin-bottom:8px}
+.panel-headline{font-size:22px;font-weight:800;line-height:1.2;margin-bottom:8px}
+.panel-copy{color:#c9d6ef;font-size:14px;line-height:1.5}
+.panel-copy strong{color:#ffffff}
+.best-meta,.market-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.cardrow{display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:10px;margin-bottom:12px}
+.card{background:#121a2b;border:1px solid #23304d;border-radius:12px;padding:12px}
+.card .label{font-size:11px;color:#9fb0d0;margin-bottom:4px}
+.card .value{font-size:22px;font-weight:700}
+.tablewrap{overflow:auto;background:#121a2b;border:1px solid #23304d;border-radius:12px}
+table{width:100%;border-collapse:collapse}
+th,td{padding:9px 8px;border-bottom:1px solid #1a2640;text-align:left;font-size:12px;white-space:nowrap}
+th{position:sticky;top:0;background:#121a2b;z-index:1;font-size:11px;color:#9fb0d0;text-transform:uppercase;letter-spacing:.04em}
+.badge{display:inline-block;padding:2px 7px;border-radius:999px;font-size:11px;font-weight:600}
+.badge.buy{background:#0f3a24;color:#7ef0b2;border:1px solid #2a6644}
+.badge.ready{background:#1e3a07;color:#a3e635;border:1px solid #3d6e10}
+.badge.watch{background:#3a2c07;color:#ffd76a;border:1px solid #6e540e}
+.badge.avoid{background:#2a1515;color:#f87171;border:1px solid #6e2a2a}
+.badge.tradeable{background:#153d2b;color:#7ef0b2}
+.badge.clean{background:#3a2c07;color:#ffd76a}
+.badge.no{background:#2a2230;color:#b9a8c9}
+.badge.fresh{background:#0d2a1a;color:#7ef0b2;font-size:10px}
+.badge.stale{background:#2e2200;color:#ffd76a;font-size:10px}
+.badge.expired{background:#1f1010;color:#9ca3af;font-size:10px}
+.badge.clustered{background:#1a1535;color:#a78bfa;font-size:10px}
+.badge.cleanflow{background:#113627;color:#83f2b4;border:1px solid #27563a}
+.badge.partial{background:#31260c;color:#ffd76a;border:1px solid #61470d}
+.badge.poison{background:#361515;color:#ff9b9b;border:1px solid #703030}
+.badge.neutral{background:#172338;color:#9db2d8;border:1px solid #304666}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px}
+small{color:#8ea0c3}
+.dim{color:#5a7090}
+.why-now{color:#d8f99a;font-size:11px;max-width:220px;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+.why-not{color:#fff1f1;font-size:11px;max-width:220px;overflow:hidden;text-overflow:ellipsis;font-weight:700}
+.token-cell{display:flex;align-items:center;gap:8px}
+.token-meta{display:flex;flex-direction:column;gap:3px}
+.token-sub{font-size:10px;color:#8196bb}
+.token-link{color:#dbe8ff;text-decoration:none;font-weight:700}
+.token-link:hover{color:#ffffff;text-decoration:underline}
+.token-actions{display:flex;gap:6px;align-items:center}
+.exec-link{font-size:10px;color:#7ef0b2;text-decoration:none;border:1px solid #27563a;background:#113627;padding:2px 6px;border-radius:999px}
+.exec-link:hover{text-decoration:underline}
+.metric-stack{display:flex;flex-direction:column;gap:3px}
+.metric-sub{font-size:10px;color:#8196bb}
+.blocker-cell{background:rgba(110,42,42,.16)}
+.row-strong{box-shadow:inset 4px 0 0 #7ef0b2;background:rgba(18,42,30,.22)}
+.row-watch{box-shadow:inset 4px 0 0 #ffd76a;background:rgba(58,44,7,.14)}
+.row-risk{box-shadow:inset 4px 0 0 #f87171}
+.cluster-banner{display:none;background:#3b0d0d;border:1px solid #7f1d1d;border-radius:10px;padding:10px 16px;margin-bottom:12px;font-size:13px;font-weight:700;color:#fca5a5}
+@media (max-width: 980px){
+  .summary-grid{grid-template-columns:1fr}
+  .cardrow{grid-template-columns:repeat(2,minmax(140px,1fr))}
+}
+</style>
+</head>
+<body>
+<div class="hero">
+  <div class="hero-copy">
+    <div class="eyebrow">Structural Quality Filter</div>
+    <h1>Anti-Bullshit Live Terminal</h1>
+    <div class="subhead">Organic vs poisoned flow for Solana memecoins. The terminal is supposed to disqualify junk fast, surface rare cleaner setups, and stay honest when structure is missing or fallback-affected.</div>
+    <div class="purpose">Most live flow is structurally bad; this terminal exists to isolate the rare setups that are cleaner than they look.</div>
+  </div>
+  <div id="modeBadge" class="mode-badge">...</div>
+</div>
+
+<!-- Clustering degraded banner (live mode only) -->
+<div id="clusterBanner" class="cluster-banner">
+  ⚠ CLUSTERING DEGRADED — BUY/READY DISABLED (set HELIUS_API_KEY or FUNDER_MAP_PATH, or set CLUSTER_REQUIRED=0)
+</div>
+
+<!-- Status strip (live mode only) -->
+<div id="statusStrip" class="status-strip" style="display:none">
+  <span id="ingestorHealth"><span class="status-dot dot-warn"></span>Connecting...</span>
+  <span id="clusterStatus" class="dim">cluster: –</span>
+  <span id="lastPoll" class="dim">–</span>
+  <span id="storeMode" class="dim">–</span>
+  <span id="freshCount" class="dim">–</span>
+</div>
+
+<!-- OFFLINE controls -->
+<div id="offlineControls" class="controls" style="display:none">
+	<label>Window:
+		<select id="window">
+			<option value="7d">7d</option>
+			<option value="14d">14d</option>
+		</select>
+	</label>
+	<label><input type="checkbox" id="tradeableOnly" checked> tradeable only</label>
+	<label><input type="checkbox" id="cleanOnly"> clean only</label>
+	<button id="reloadBtn">Reload view</button>
+	<button id="refreshBtn" class="secondary">Refresh CSVs</button>
+</div>
+
+<!-- LIVE controls -->
+<div id="liveControls" class="controls" style="display:none">
+	<button id="liveReloadBtn">Refresh now</button>
+	<label style="font-size:13px"><input type="checkbox" id="showAllLive" checked> show expired/stale</label>
+</div>
+
+<div class="summary-grid" id="liveSummary" style="display:none">
+	<div class="panel" id="best-setup-panel">
+		<h3>Best Current Setup</h3>
+		<div class="panel-headline" id="bestSetupHeadline">Best available, but still low-conviction</div>
+		<div class="verdict" id="bestSetupVerdict">structurally broken</div>
+		<div class="blocker" id="bestSetupBlocker">Blocker: impossible execution • thin liquidity</div>
+		<div class="evidence" id="bestSetupEvidence">13 eff buyers /1m • 13 eff buyers /5m • 12 holders</div>
+		<div class="best-meta" id="bestSetupMeta"><span class='badge avoid'>AVOID</span><span class='badge verdict-label poison'>structurally broken</span><span class='badge neutral'>conf 64</span><span class='badge neutral'>partial fallback</span></div>
+	</div>
+	<div class="panel">
+		<div class="panel-title">Why This Tool Exists</div>
+		<div class="panel-copy" id="marketReadCopy">There is some cleaner flow, but fallback and compression still dominate the screen. Treat most motion as suspicious before it proves otherwise.</div>
+		<div class="market-meta" id="marketReadMeta"><span class='badge neutral'>14 rows tracked</span><span class='badge cleanflow'>3 structurally cleaner</span><span class='badge partial'>7 fallback-affected</span><span class='badge poison'>4 incomplete MC</span></div>
+	</div>
+</div>
+
+<div class="cardrow">
+	<div class="card"><div class="label">Mode</div><div class="value" id="modeCard">-</div></div>
+	<div class="card"><div class="label">Selective view</div><div class="value" id="rowsCard">-</div></div>
+	<div class="card"><div class="label">Rare top states</div><div class="value" id="buyers1mCard">-</div></div>
+	<div class="card"><div class="label">Structurally clean</div><div class="value" id="accelCard">-</div></div>
+</div>
+
+<div class="tablewrap">
+<table id="signalTable">
+	<thead id="theadOffline" style="display:none">
+		<tr>
+			<th>token</th><th>score</th><th>tradeable</th><th>clean</th>
+			<th>sniper</th><th>first_min</th><th>winner_exit</th>
+			<th>opp</th><th>adv</th><th>mon</th>
+		</tr>
+	</thead>
+	<thead id="theadLive" style="display:none">
+		<tr>
+			<th>decision</th>
+			<th>verdict</th>
+			<th>conf</th>
+			<th>state</th>
+			<th>token</th>
+			<th title="raw buyers last 1m / effective after clustering">buyer quality</th>
+			<th title="clustering trust, compression, and row-level fallback">clustering</th>
+			<th title="buy SOL / sell SOL in last 1m">buy/sell 1m</th>
+			<th title="buyer acceleration ratio">accel</th>
+			<th title="execution quality [0-1]">exec</th>
+			<th title="adversarial score [0-1]">adv</th>
+			<th title="estimated price impact %">impact%</th>
+			<th>age</th>
+			<th title="7-gate engine: pass count / 7; L0 = layer-0 hard reject; ceiling label shown when engine caps the decision">gates</th>
+			<th title="Gate 1 — liquidity / market-cap ratio %; &lt;3% = avoid, 3-5% = watch floor, &gt;5% = eligible">liq/mc</th>
+			<th title="Gate 4 — volume / market-cap ratio %; &lt;2% = low conviction, &gt;5% = healthy">vol/mc</th>
+			<th title="why this is worth a glance now">why now</th>
+			<th title="dominant disqualifier / missing structure">disqualifier</th>
+		</tr>
+	</thead>
+	<tbody id="tbody"><tr class="live-row row-risk"><td><span class='badge avoid'>AVOID</span></td><td class="verdict-label"><strong>structurally broken</strong></td><td>64</td><td><span class='badge expired'>expired</span></td><td class="exec-cell"><div class='token-cell'><div class='token-meta'><div class='token-actions'><a class='token-link mono' href='https://gmgn.ai/sol/token/GM7cfvZdTQrM7ZkB4FNSv8DxuCc3oWu1inHiTFZqpump' target='_blank' rel='noopener noreferrer'>GM7cfvZd…</a><a href="https://gmgn.ai/sol/token/GM7cfvZdTQrM7ZkB4FNSv8DxuCc3oWu1inHiTFZqpump" class="gmgn-link exec-link" target="_blank" rel="noopener noreferrer">EXECUTE [GMGN]</a></div><span class='token-sub'><span class='badge poison'>low conviction</span></span></div></div></td><td><div class='metric-stack'><span>13 raw / 13 eff</span><span class='metric-sub'>organic buyer set</span></div></td><td><div class='metric-stack'><span>partial fallback <span class='badge partial'>partial fallback</span></span><span class='metric-sub'>0% compressed</span></div></td><td>0.86/0.05</td><td>0.00</td><td>0.05</td><td>0.15</td><td>100.0%</td><td>0.4m</td><td>L0: impossible_execution: liquidity=0.91 SOL &lt; 5.00 SOL minimum</td><td>n/a</td><td>n/a</td><td class="why-now-cell">13 eff buyers /1m • 13 eff buyers /5m • 12 holders</td><td class="blocker-cell">impossible execution • thin liquidity</td></tr><tr class="live-row row-risk"><td><span class='badge avoid'>AVOID</span></td><td class="verdict-label"><strong>structurally broken</strong></td><td>56</td><td><span class='badge expired'>expired</span></td><td class="exec-cell"><div class='token-cell'><div class='token-meta'><div class='token-actions'><a class='token-link mono' href='https://gmgn.ai/sol/token/EgXQTBXwCSNFrPoB3kWfdy1RaAPUzBvfNAxu4P56pump' target='_blank' rel='noopener noreferrer'>EgXQTBXw…</a><a href="https://gmgn.ai/sol/token/EgXQTBXwCSNFrPoB3kWfdy1RaAPUzBvfNAxu4P56pump" class="gmgn-link exec-link" target="_blank" rel="noopener noreferrer">EXECUTE [GMGN]</a></div><span class='token-sub'><span class='badge poison'>low conviction</span></span></div></div></td><td><div class='metric-stack'><span>5 raw / 3 eff</span><span class='metric-sub'>compressed after clustering</span></div></td><td><div class='metric-stack'><span>partial fallback <span class='badge partial'>partial fallback</span></span><span class='metric-sub'>40% compressed</span></div></td><td>0.31/0.08</td><td>0.00</td><td>0.02</td><td>0.26</td><td>100.0%</td><td>0.4m</td><td>L0: impossible_execution: liquidity=0.39 SOL &lt; 5.00 SOL minimum</td><td>n/a</td><td>n/a</td><td class="why-now-cell">3 eff buyers /1m • 3 eff buyers /5m • 5 holders</td><td class="blocker-cell">impossible execution • thin liquidity</td></tr><tr class="live-row row-risk"><td><span class='badge avoid'>AVOID</span></td><td class="verdict-label"><strong>structurally broken</strong></td><td>51</td><td><span class='badge expired'>expired</span></td><td class="exec-cell"><div class='token-cell'><div class='token-meta'><div class='token-actions'><a class='token-link mono' href='https://gmgn.ai/sol/token/5G1M83kQjPBwSidYiLDT3WcWzxJRD4t9BG6SZbnHkyfK' target='_blank' rel='noopener noreferrer'>5G1M83kQ…</a><a href="https://gmgn.ai/sol/token/5G1M83kQjPBwSidYiLDT3WcWzxJRD4t9BG6SZbnHkyfK" class="gmgn-link exec-link" target="_blank" rel="noopener noreferrer">EXECUTE [GMGN]</a></div><span class='token-sub'><span class='badge poison'>low conviction</span></span></div></div></td><td><div class='metric-stack'><span>2 raw / 2 eff</span><span class='metric-sub'>organic buyer set</span></div></td><td><div class='metric-stack'><span>partial fallback <span class='badge partial'>partial fallback</span></span><span class='metric-sub'>0% compressed</span></div></td><td>0.02/0.01</td><td>0.00</td><td>0.00</td><td>0.45</td><td>100.0%</td><td>0.4m</td><td>L0: impossible_execution: liquidity=0.03 SOL &lt; 5.00 SOL minimum</td><td>n/a</td><td>n/a</td><td class="why-now-cell">2 eff buyers /1m • 1 eff buyers /5m • 2 holders</td><td class="blocker-cell">impossible execution • thin liquidity</td></tr><tr class="live-row row-risk"><td><span class='badge avoid'>AVOID</span></td><td class="verdict-label"><strong>structurally broken</strong></td><td>51</td><td><span class='badge expired'>expired</span></td><td class="exec-cell"><div class='token-cell'><div class='token-meta'><div class='token-actions'><a class='token-link mono' href='https://gmgn.ai/sol/token/9PR7nCP9DpcUotnDPVLUBUZKu5WAYkwrCUx9wDnSpump' target='_blank' rel='noopener noreferrer'>9PR7nCP9…</a><a href="https://gmgn.ai/sol/token/9PR7nCP9DpcUotnDPVLUBUZKu5WAYkwrCUx9wDnSpump" class="gmgn-link exec-link" target="_blank" rel="noopener noreferrer">EXECUTE [GMGN]</a></div><span class='token-sub'><span class='badge poison'>low conviction</span></span></div></div></td><td><div class='metric-stack'><span>2 raw / 2 eff</span><span class='metric-sub'>organic buyer set</span></div></td><td><div class='metric-stack'><span>partial fallback <span class='badge partial'>partial fallback</span></span><span class='metric-sub'>0% compressed</span></div></td><td>3.53/0.00</td><td>0.00</td><td>0.18</td><td>0.60</td><td>28.4%</td><td>0.4m</td><td>L0: impossible_execution: liquidity=3.53 SOL &lt; 5.00 SOL minimum</td><td>n/a</td><td>n/a</td><td class="why-now-cell">2 eff buyers /1m • 2 eff buyers /5m • 2 holders</td><td class="blocker-cell">impossible execution • thin liquidity</td></tr><tr class="live-row row-risk"><td><span class='badge avoid'>AVOID</span></td><td class="verdict-label"><strong>structurally broken</strong></td><td>60</td><td><span class='badge expired'>expired</span></td><td class="exec-cell"><div class='token-cell'><div class='token-meta'><div class='token-actions'><a class='token-link mono' href='https://gmgn.ai/sol/token/FAkx8774gsnux8usuRueP5oFV7k8MyUPEWQHnKwBpump' target='_blank' rel='noopener noreferrer'>FAkx8774…</a><a href="https://gmgn.ai/sol/token/FAkx8774gsnux8usuRueP5oFV7k8MyUPEWQHnKwBpump" class="gmgn-link exec-link" target="_blank" rel="noopener noreferrer">EXECUTE [GMGN]</a></div><span class='token-sub'><span class='badge poison'>low conviction</span></span></div></div></td><td><div class='metric-stack'><span>3 raw / 3 eff</span><span class='metric-sub'>organic buyer set</span></div></td><td><div class='metric-stack'><span>partial fallback <span class='badge partial'>partial fallback</span></span><span class='metric-sub'>0% compressed</span></div></td><td>0.29/0.00</td><td>0.00</td><td>0.01</td><td>0.34</td><td>100.0%</td><td>0.4m</td><td>L0: impossible_execution: liquidity=0.29 SOL &lt; 5.00 SOL minimum</td><td>n/a</td><td>n/a</td><td class="why-now-cell">3 eff buyers /1m • 3 eff buyers /5m • 3 holders</td><td class="blocker-cell">impossible execution • thin liquidity</td></tr><tr class="live-row row-watch"><td><span class='badge avoid'>AVOID</span></td><td class="verdict-label"><strong>clean-ish but incomplete</strong></td><td>40</td><td><span class='badge expired'>expired</span></td><td class="exec-cell"><div class='token-cell'><div class='token-meta'><div class='token-actions'><a class='token-link mono' href='https://gmgn.ai/sol/token/5KjAtMCWU6QYVDUTyBfXwAXqLUjMvFey5TXFkpC4pump' target='_blank' rel='noopener noreferrer'>5KjAtMCW…</a><a href="https://gmgn.ai/sol/token/5KjAtMCWU6QYVDUTyBfXwAXqLUjMvFey5TXFkpC4pump" class="gmgn-link exec-link" target="_blank" rel="noopener noreferrer">EXECUTE [GMGN]</a></div><span class='token-sub'><span class='badge partial'>compromised</span></span></div></div></td><td><div class='metric-stack'><span>0 raw / 0 eff</span><span class='metric-sub'>no real buy pressure</span></div></td><td><div class='metric-stack'><span>clean <span class='badge cleanflow'>resolved</span></span><span class='metric-sub'>0% compressed</span></div></td><td>0.00/6.67</td><td>0.00</td><td>0.33</td><td>0.00</td><td>15.0%</td><td>0.4m</td><td>1/7 →AVOID</td><td>no holder proxy</td><td>no holder proxy</td><td class="why-now-cell">clean clustering • low impact</td><td class="blocker-cell">no holder proxy • slippage ceiling</td></tr><tr class="live-row row-risk"><td><span class='badge avoid'>AVOID</span></td><td class="verdict-label"><strong>structurally broken</strong></td><td>30</td><td><span class='badge expired'>expired</span></td><td class="exec-cell"><div class='token-cell'><div class='token-meta'><div class='token-actions'><a class='token-link mono' href='https://gmgn.ai/sol/token/v1zHayEHSFqEuEa8kX4aSfWTa8qhNnaVNtAy1V7pump' target='_blank' rel='noopener noreferrer'>v1zHayEH…</a><a href="https://gmgn.ai/sol/token/v1zHayEHSFqEuEa8kX4aSfWTa8qhNnaVNtAy1V7pump" class="gmgn-link exec-link" target="_blank" rel="noopener noreferrer">EXECUTE [GMGN]</a></div><span class='token-sub'><span class='badge poison'>low conviction</span></span></div></div></td><td><div class='metric-stack'><span>1 raw / 1 eff</span><span class='metric-sub'>organic buyer set</span></div></td><td><div class='metric-stack'><span>clean <span class='badge cleanflow'>resolved</span></span><span class='metric-sub'>0% compressed</span></div></td><td>0.10/0.00</td><td>0.00</td><td>0.01</td><td>0.45</td><td>100.0%</td><td>0.4m</td><td>L0: impossible_execution: liquidity=0.10 SOL &lt; 5.00 SOL minimum</td><td>n/a</td><td>n/a</td><td class="why-now-cell">1 eff buyers /1m • 1 eff buyers /5m • clean clustering</td><td class="blocker-cell">impossible execution • thin liquidity</td></tr><tr class="live-row row-risk"><td><span class='badge avoid'>AVOID</span></td><td class="verdict-label"><strong>structurally broken</strong></td><td>30</td><td><span class='badge expired'>expired</span></td><td class="exec-cell"><div class='token-cell'><div class='token-meta'><div class='token-actions'><a class='token-link mono' href='https://gmgn.ai/sol/token/HyDKNdnhZNVYQMruBevbNsUWruA9STmAQrS4srXApump' target='_blank' rel='noopener noreferrer'>HyDKNdnh…</a><a href="https://gmgn.ai/sol/token/HyDKNdnhZNVYQMruBevbNsUWruA9STmAQrS4srXApump" class="gmgn-link exec-link" target="_blank" rel="noopener noreferrer">EXECUTE [GMGN]</a></div><span class='token-sub'><span class='badge poison'>low conviction</span></span></div></div></td><td><div class='metric-stack'><span>1 raw / 1 eff</span><span class='metric-sub'>organic buyer set</span></div></td><td><div class='metric-stack'><span>full fallback <span class='badge partial'>full fallback</span></span><span class='metric-sub'>0% compressed</span></div></td><td>0.00/0.00</td><td>0.00</td><td>0.00</td><td>0.45</td><td>100.0%</td><td>0.4m</td><td>L0: impossible_execution: liquidity=0.00 SOL &lt; 5.00 SOL minimum</td><td>n/a</td><td>n/a</td><td class="why-now-cell">1 eff buyers /1m • 1 eff buyers /5m • 1 holders</td><td class="blocker-cell">impossible execution • thin liquidity</td></tr><tr class="live-row row-risk"><td><span class='badge avoid'>AVOID</span></td><td class="verdict-label"><strong>structurally broken</strong></td><td>61</td><td><span class='badge expired'>expired</span></td><td class="exec-cell"><div class='token-cell'><div class='token-meta'><div class='token-actions'><a class='token-link mono' href='https://gmgn.ai/sol/token/9Pt8yvR49FXYyLfHTf4MPT4xC4QmRV7X7v5iBZy1pump' target='_blank' rel='noopener noreferrer'>9Pt8yvR4…</a><a href="https://gmgn.ai/sol/token/9Pt8yvR49FXYyLfHTf4MPT4xC4QmRV7X7v5iBZy1pump" class="gmgn-link exec-link" target="_blank" rel="noopener noreferrer">EXECUTE [GMGN]</a></div><span class='token-sub'><span class='badge poison'>low conviction</span></span></div></div></td><td><div class='metric-stack'><span>3 raw / 3 eff</span><span class='metric-sub'>organic buyer set</span></div></td><td><div class='metric-stack'><span>partial fallback <span class='badge partial'>partial fallback</span></span><span class='metric-sub'>0% compressed</span></div></td><td>0.03/0.00</td><td>0.00</td><td>0.00</td><td>0.30</td><td>100.0%</td><td>0.4m</td><td>L0: impossible_execution: liquidity=0.03 SOL &lt; 5.00 SOL minimum</td><td>n/a</td><td>n/a</td><td class="why-now-cell">3 eff buyers /1m • 3 eff buyers /5m • 3 holders</td><td class="blocker-cell">impossible execution • thin liquidity</td></tr><tr class="live-row row-risk"><td><span class='badge avoid'>AVOID</span></td><td class="verdict-label"><strong>structurally broken</strong></td><td>31</td><td><span class='badge expired'>expired</span></td><td class="exec-cell"><div class='token-cell'><div class='token-meta'><div class='token-actions'><a class='token-link mono' href='https://gmgn.ai/sol/token/J186WtYErzrwAVg9Nbv9rth4u6c8eoDP9XFEHRjdZsqn' target='_blank' rel='noopener noreferrer'>J186WtYE…</a><a href="https://gmgn.ai/sol/token/J186WtYErzrwAVg9Nbv9rth4u6c8eoDP9XFEHRjdZsqn" class="gmgn-link exec-link" target="_blank" rel="noopener noreferrer">EXECUTE [GMGN]</a></div><span class='token-sub'><span class='badge poison'>low conviction</span></span></div></div></td><td><div class='metric-stack'><span>1 raw / 1 eff</span><span class='metric-sub'>organic buyer set</span></div></td><td><div class='metric-stack'><span>clean <span class='badge cleanflow'>resolved</span></span><span class='metric-sub'>0% compressed</span></div></td><td>0.00/0.00</td><td>0.00</td><td>0.00</td><td>0.45</td><td>100.0%</td><td>0.4m</td><td>L0: impossible_execution: liquidity=0.00 SOL &lt; 5.00 SOL minimum</td><td>n/a</td><td>n/a</td><td class="why-now-cell">1 eff buyers /1m • 1 eff buyers /5m • clean clustering</td><td class="blocker-cell">impossible execution • thin liquidity</td></tr><tr class="live-row row-risk"><td><span class='badge avoid'>AVOID</span></td><td class="verdict-label"><strong>structurally broken</strong></td><td>31</td><td><span class='badge expired'>expired</span></td><td class="exec-cell"><div class='token-cell'><div class='token-meta'><div class='token-actions'><a class='token-link mono' href='https://gmgn.ai/sol/token/DtR4D9FtVoTX2569gaL837ZgrB6wNjj6tkmnX9Rdk9B2' target='_blank' rel='noopener noreferrer'>DtR4D9Ft…</a><a href="https://gmgn.ai/sol/token/DtR4D9FtVoTX2569gaL837ZgrB6wNjj6tkmnX9Rdk9B2" class="gmgn-link exec-link" target="_blank" rel="noopener noreferrer">EXECUTE [GMGN]</a></div><span class='token-sub'><span class='badge poison'>low conviction</span></span></div></div></td><td><div class='metric-stack'><span>1 raw / 1 eff</span><span class='metric-sub'>organic buyer set</span></div></td><td><div class='metric-stack'><span>clean <span class='badge cleanflow'>resolved</span></span><span class='metric-sub'>0% compressed</span></div></td><td>0.01/0.00</td><td>0.00</td><td>0.00</td><td>0.45</td><td>100.0%</td><td>0.4m</td><td>L0: impossible_execution: liquidity=0.01 SOL &lt; 5.00 SOL minimum</td><td>n/a</td><td>n/a</td><td class="why-now-cell">1 eff buyers /1m • 1 eff buyers /5m • clean clustering</td><td class="blocker-cell">impossible execution • thin liquidity</td></tr><tr class="live-row row-watch"><td><span class='badge avoid'>AVOID</span></td><td class="verdict-label"><strong>clean-ish but incomplete</strong></td><td>40</td><td><span class='badge expired'>expired</span></td><td class="exec-cell"><div class='token-cell'><div class='token-meta'><div class='token-actions'><a class='token-link mono' href='https://gmgn.ai/sol/token/Df6yfrKC8kZE3KNkrHERKzAetSxbrWeniQfyJY4Jpump' target='_blank' rel='noopener noreferrer'>Df6yfrKC…</a><a href="https://gmgn.ai/sol/token/Df6yfrKC8kZE3KNkrHERKzAetSxbrWeniQfyJY4Jpump" class="gmgn-link exec-link" target="_blank" rel="noopener noreferrer">EXECUTE [GMGN]</a></div><span class='token-sub'><span class='badge partial'>compromised</span></span></div></div></td><td><div class='metric-stack'><span>0 raw / 0 eff</span><span class='metric-sub'>no real buy pressure</span></div></td><td><div class='metric-stack'><span>clean <span class='badge cleanflow'>resolved</span></span><span class='metric-sub'>0% compressed</span></div></td><td>0.00/6.00</td><td>0.00</td><td>0.30</td><td>0.00</td><td>16.7%</td><td>0.4m</td><td>1/7 →AVOID</td><td>no holder proxy</td><td>no holder proxy</td><td class="why-now-cell">clean clustering</td><td class="blocker-cell">no holder proxy • slippage ceiling</td></tr><tr class="live-row row-watch"><td><span class='badge avoid'>AVOID</span></td><td class="verdict-label"><strong>clean-ish but incomplete</strong></td><td>40</td><td><span class='badge expired'>expired</span></td><td class="exec-cell"><div class='token-cell'><div class='token-meta'><div class='token-actions'><a class='token-link mono' href='https://gmgn.ai/sol/token/KENJSUYLASHUMfHyy5o4Hp2FdNqZg1AsUPhfH2kYvEP' target='_blank' rel='noopener noreferrer'>KENJSUYL…</a><a href="https://gmgn.ai/sol/token/KENJSUYLASHUMfHyy5o4Hp2FdNqZg1AsUPhfH2kYvEP" class="gmgn-link exec-link" target="_blank" rel="noopener noreferrer">EXECUTE [GMGN]</a></div><span class='token-sub'><span class='badge partial'>compromised</span></span></div></div></td><td><div class='metric-stack'><span>0 raw / 0 eff</span><span class='metric-sub'>no real buy pressure</span></div></td><td><div class='metric-stack'><span>clean <span class='badge cleanflow'>resolved</span></span><span class='metric-sub'>0% compressed</span></div></td><td>0.00/6.01</td><td>0.00</td><td>0.30</td><td>0.00</td><td>16.6%</td><td>0.4m</td><td>1/7 →AVOID</td><td>no holder proxy</td><td>no holder proxy</td><td class="why-now-cell">clean clustering</td><td class="blocker-cell">no holder proxy • slippage ceiling</td></tr><tr class="live-row row-risk"><td><span class='badge avoid'>AVOID</span></td><td class="verdict-label"><strong>structurally broken</strong></td><td>33</td><td><span class='badge expired'>expired</span></td><td class="exec-cell"><div class='token-cell'><div class='token-meta'><div class='token-actions'><a class='token-link mono' href='https://gmgn.ai/sol/token/Dfh5DzRgSvvCFDoYc2ciTkMrbDfRKybA4SoFbPmApump' target='_blank' rel='noopener noreferrer'>Dfh5DzRg…</a><a href="https://gmgn.ai/sol/token/Dfh5DzRgSvvCFDoYc2ciTkMrbDfRKybA4SoFbPmApump" class="gmgn-link exec-link" target="_blank" rel="noopener noreferrer">EXECUTE [GMGN]</a></div><span class='token-sub'><span class='badge poison'>low conviction</span></span></div></div></td><td><div class='metric-stack'><span>0 raw / 0 eff</span><span class='metric-sub'>no real buy pressure</span></div></td><td><div class='metric-stack'><span>clean <span class='badge cleanflow'>resolved</span></span><span class='metric-sub'>0% compressed</span></div></td><td>0.00/1.48</td><td>0.00</td><td>0.07</td><td>0.00</td><td>67.4%</td><td>0.4m</td><td>L0: impossible_execution: liquidity=1.48 SOL &lt; 5.00 SOL minimum</td><td>n/a</td><td>n/a</td><td class="why-now-cell">clean clustering</td><td class="blocker-cell">impossible execution • thin liquidity</td></tr></tbody>
+</table>
+</div>
+
+<p><small id="tableNote"></small></p>
+
+<script>
+// ---- config ----
+let CFG = {live_mode: false, ingestor_url: "", refresh_interval: 10};
+let liveTimer = null;
+
+async function init() {
+	try {
+		const r = await fetch("/api/config");
+		CFG = await r.json();
+	} catch(_) {}
+
+	if (CFG.live_mode) {
+		document.getElementById("modeBadge").textContent = "Mode: LIVE";
+		document.getElementById("modeBadge").className = "mode-badge mode-live";
+		document.getElementById("modeCard").textContent = "LIVE";
+		document.getElementById("liveControls").style.display = "flex";
+		document.getElementById("liveSummary").style.display = "grid";
+		document.getElementById("theadLive").style.display = "";
+		document.getElementById("statusStrip").style.display = "flex";
+		document.getElementById("tableNote").textContent =
+			"Live structural filter — auto-refresh every " + CFG.refresh_interval + "s. The terminal is allowed to say that nothing is good enough.";
+		document.getElementById("liveReloadBtn").addEventListener("click", loadLive);
+		document.getElementById("showAllLive").addEventListener("change", loadLive);
+		startLivePolling();
+		loadLive();
+	} else {
+		document.getElementById("modeBadge").textContent = "Mode: OFFLINE";
+		document.getElementById("modeBadge").className = "mode-badge mode-offline";
+		document.getElementById("modeCard").textContent = "OFFLINE";
+		document.getElementById("offlineControls").style.display = "flex";
+		document.getElementById("theadOffline").style.display = "";
+		document.getElementById("tableNote").textContent =
+			"Offline scorer outputs. Run scorer to refresh CSVs.";
+		document.getElementById("reloadBtn").addEventListener("click", loadOffline);
+		document.getElementById("refreshBtn").addEventListener("click", refreshCSVs);
+		document.getElementById("window").addEventListener("change", loadOffline);
+		document.getElementById("tradeableOnly").addEventListener("change", loadOffline);
+		document.getElementById("cleanOnly").addEventListener("change", loadOffline);
+		loadOffline();
+	}
+}
+
+// ---- OFFLINE mode ----
+async function loadOffline() {
+	const windowVal = document.getElementById("window").value;
+	const tradeableOnly = document.getElementById("tradeableOnly").checked ? "1" : "0";
+	const cleanOnly = document.getElementById("cleanOnly").checked ? "1" : "0";
+
+	let data;
+	try {
+		const res = await fetch(
+			"/api/signals?window=" + encodeURIComponent(windowVal) +
+			"&tradeable_only=" + tradeableOnly + "&clean_only=" + cleanOnly
+		);
+		if (!res.ok) throw new Error("HTTP " + res.status);
+		data = await res.json();
+	} catch(e) {
+		setError("Error loading signals: " + e.message, 10);
+		return;
+	}
+
+	document.getElementById("rowsCard").textContent = data.returned_count + "/" + data.total_rows;
+	document.getElementById("buyers1mCard").textContent = "-";
+	document.getElementById("accelCard").textContent = "-";
+
+	const tbody = document.getElementById("tbody");
+	tbody.innerHTML = "";
+
+	if (!data.signals || data.signals.length === 0) {
+		setEmpty("No fresh signals yet — run the scorer first", 10);
+		return;
+	}
+
+	for (const s of data.signals) {
+		const tr = document.createElement("tr");
+		tr.innerHTML =
+			"<td class='mono'>" + s.token_mint + "</td>" +
+			"<td>" + Number(s.opportunity_score).toFixed(4) + "</td>" +
+			td_badge(s.predicted_tradeable, "tradeable") +
+			td_badge(s.predicted_clean_tradeable, "clean") +
+			"<td>" + Number(s.sniper_intensity_ratio).toFixed(4) + "</td>" +
+			"<td>" + Number(s.first_minute_share).toFixed(4) + "</td>" +
+			"<td>" + Number(s.winner_exit_ratio).toFixed(4) + "</td>" +
+			"<td>" + Number(s.opportunity_component).toFixed(4) + "</td>" +
+			"<td>" + Number(s.adversarial_component).toFixed(4) + "</td>" +
+			"<td>" + Number(s.monetization_component).toFixed(4) + "</td>";
+		tbody.appendChild(tr);
+	}
+}
+
+async function refreshCSVs() {
+	await fetch("/api/refresh");
+	await loadOffline();
+}
+
+// ---- LIVE mode ----
+async function loadLive() {
+	const showAll = document.getElementById("showAllLive") && document.getElementById("showAllLive").checked;
+	const actionableOnly = showAll ? "0" : "1";
+
+	const ts = Date.now();
+	let snapshots;
+	try {
+		const res = await fetch(
+			"/api/live-snapshots?min_buyers=0&since_minutes=240&limit=100&actionable_only=" + actionableOnly + "&ts=" + ts,
+			{ cache: "no-store" }
+		);
+		if (!res.ok) throw new Error("HTTP " + res.status);
+		snapshots = await res.json();
+	} catch(e) {
+		updateStatusStrip(false, null, null, null);
+		setError("Live ingestor unreachable: " + e.message, 18);
+		return;
+	}
+
+	// Fetch healthz for clustering status.
+	// Use cache:no-store + ts param so browsers never serve a stale response.
+	let healthData = null;
+	try {
+		const hr = await fetch("/api/ingestor-health?ts=" + ts, { cache: "no-store" });
+		if (hr.ok) healthData = await hr.json();
+	} catch(_) {}
+
+	const now = new Date();
+	updateStatusStrip(true, now, snapshots, healthData);
+
+	if (!snapshots || snapshots.length === 0) {
+		document.getElementById("rowsCard").textContent = "0";
+		document.getElementById("buyers1mCard").textContent = "0 / 0";
+		document.getElementById("accelCard").textContent = "0";
+		updateBestSetup(null, snapshots || []);
+		setEmpty("No live signals yet — waiting for webhook activity", 18);
+		return;
+	}
+
+	const freshCount = snapshots.filter(x => x.is_actionable).length;
+	const buyCount = snapshots.filter(x => x.decision === "BUY" && x.is_actionable).length;
+	const readyCount = snapshots.filter(x => x.decision === "READY" && x.is_actionable).length;
+	const cleanCount = snapshots.filter(x => visuallyClean(x)).length;
+	document.getElementById("rowsCard").textContent = freshCount + "/" + snapshots.length;
+	document.getElementById("buyers1mCard").textContent = "B:" + buyCount + " R:" + readyCount;
+	document.getElementById("accelCard").textContent = cleanCount + "/" + snapshots.length;
+	updateBestSetup(chooseBestSetup(snapshots), snapshots);
+
+	const tbody = document.getElementById("tbody");
+	tbody.innerHTML = "";
+
+	for (const s of snapshots) {
+		const ageMin = (s.age_seconds / 60).toFixed(1);
+		const accel = Number(s.buyer_acceleration || 0).toFixed(2);
+		const exec = Number(s.execution_penalty || 0).toFixed(2);
+		const adv = Number(s.adversarial_score || 0).toFixed(2);
+		const impactPct = Number(s.estimated_impact_pct || 0).toFixed(1);
+		const conf = Math.round(s.confidence_score || 0);
+		const rawBuyers = s.buyers_last1m || 0;
+		const effBuyers = s.effective_buyers_1m || 0;
+		const clusterPct = Math.round((s.funding_cluster_ratio || 0) * 100);
+		const rowClusterStatus = s.clustering_row_status || "resolved";
+		const rowClusterTimeouts = s.clustering_timeouts || 0;
+		const rowClusterFallbacks = s.clustering_fallbacks || 0;
+		const buySol1m = Number(s.buy_sol_last_1m || 0).toFixed(2);
+		const sellSol1m = Number(s.sell_sol_last_1m || 0).toFixed(2);
+		const state = s.signal_state || "expired";
+		const dec = s.decision || "?";
+		const mint = s.mint || "";
+
+		// Decision badge
+		const decClass = dec === "BUY" ? "buy" : dec === "READY" ? "ready" : dec === "WATCH" ? "watch" : "avoid";
+
+		// Signal state badge
+		const stateClass = state === "fresh" ? "fresh" : state === "stale" ? "stale" : "expired";
+
+		// Confidence colour
+		const confStyle = conf >= 70 ? "color:#7ef0b2" : conf >= 45 ? "color:#ffd76a" : "color:#f87171";
+
+		// Accel colour
+		const accelStyle = s.buyer_acceleration > 1 ? "color:#7ef0b2;font-weight:700" : "color:#8ea0c3";
+
+		// Exec colour
+		const execScore = s.execution_penalty || 0;
+		const execStyle = execScore >= 0.5 ? "color:#7ef0b2" : execScore >= 0.3 ? "color:#ffd76a" : "color:#f87171";
+
+		// Adv colour
+		const advScore = s.adversarial_score || 0;
+		const advStyle = advScore < 0.3 ? "color:#7ef0b2" : advScore < 0.6 ? "color:#ffd76a" : "color:#f87171";
+
+		// Impact colour
+		const impact = s.estimated_impact_pct || 0;
+		const impactStyle = impact < 5 ? "color:#7ef0b2" : impact < 15 ? "color:#ffd76a" : "color:#f87171";
+
+		// Raw/eff buyers — highlight when clustering reduces count
+		const buyersStyle = effBuyers < rawBuyers ? "color:#ffd76a" : "";
+
+		// 1m buy/sell — highlight reversal
+		const flowStyle = (parseFloat(sellSol1m) >= parseFloat(buySol1m) && (parseFloat(buySol1m) > 0 || parseFloat(sellSol1m) > 0))
+			? "color:#f87171" : "color:#8ea0c3";
+
+		// Engine explainability
+		const eng = s.engine || {};
+		const l0Reject = eng.layer0_reject === true;
+		const l0Reason = eng.layer0_reason || "";
+		const maxLabel = eng.max_label || "";
+		// gates is always [] or a real array — never null — from the server.
+		const gates = Array.isArray(eng.gates) ? eng.gates : [];
+		const gatePass = typeof eng.gates_pass_count === "number" ? eng.gates_pass_count : 0;
+		const gateTotal = l0Reject ? 0 : (gates.length || 7);
+
+		// Gate 1 = liq/mc ratio %, Gate 4 = vol/mc ratio %
+		const g1 = gates.find(g => g.gate_id === 1) || {};
+		const g4 = gates.find(g => g.gate_id === 4) || {};
+		const verdict = s.operator_verdict;
+		const fullWhyNot = [s.dominant_blocker, s.why_not_higher, (s.reasons || []).join(" | "), gateReasonList(eng)].filter(Boolean).join(" | ");
+		const clusterTrust = clusteringSurfaceLabel(s);
+		const clusterCompression = clusterPct > 0 ? clusterPct + "% compressed" : "0% compressed";
+		const clusterFallbackBadge = rowClusterStatus !== "resolved"
+			? " <span class='badge partial' title='row-level clustering fallback; timeouts=" + rowClusterTimeouts + ", fallbacks=" + rowClusterFallbacks + "'>" + rowClusterStatus.replace("_"," ") + "</span>"
+			: " <span class='badge cleanflow'>resolved</span>";
+		const qualityTier = visualTier(verdict, s);
+		const qualityBadge = qualityTier === "clean"
+			? "<span class='badge cleanflow'>clean</span>"
+			: qualityTier === "compromised"
+				? "<span class='badge partial'>compromised</span>"
+				: "<span class='badge poison'>low conviction</span>";
+		const liqMcPct = (g1.value != null && !g1.skipped) ? Number(g1.value).toFixed(1) + "%" : compactMissingStructure(s.market_cap_reason || g1.reason || "market cap unavailable");
+		const volMcPct = (g4.value != null && !g4.skipped) ? Number(g4.value).toFixed(1) + "%" : compactMissingStructure(s.market_cap_reason || g4.reason || "market cap unavailable");
+
+		const g1Style = g1.passed ? "color:#7ef0b2" : g1.skipped ? "color:#5a7090" : "color:#f87171";
+		const g4Style = g4.passed ? "color:#7ef0b2" : g4.skipped ? "color:#5a7090" : "color:#f87171";
+
+		// Gates cell rendering:
+		//   Layer 0 reject  → "L0: <reason>" in red; gates not evaluated
+		//   Normal          → "N/7" pass count + ceiling suffix
+		let gatesCell;
+		if (l0Reject) {
+			const l0Tip = l0Reason ? escAttr(l0Reason) : "layer0 hard reject";
+			gatesCell = "<span style='color:#f87171;font-size:10px;font-weight:700' title='" + l0Tip + "'>L0: " + esc(l0Reason || "reject") + "</span>";
+		} else {
+			const gateStyle = gatePass >= 6 ? "color:#7ef0b2" : gatePass >= 4 ? "color:#ffd76a" : "color:#f87171";
+			const ceilSuffix = (maxLabel && maxLabel !== "BUY")
+				? " <span class='dim' style='font-size:10px'>→" + maxLabel + "</span>" : "";
+			gatesCell = "<span style='" + gateStyle + "'>" + gatePass + "/" + gateTotal + "</span>" + ceilSuffix;
+		}
+
+		// Gate 1 tooltip: gate reason
+		const g1Title = g1.reason ? escAttr(g1.reason) : "Gate 1: liquidity/MC ratio";
+		const g4Title = g4.reason ? escAttr(g4.reason) : "Gate 4: volume/MC ratio";
+		const tokenHref = s.execution_url;
+
+		const tr = document.createElement("tr");
+		tr.setAttribute("data-actionable", s.is_actionable ? "1" : "0");
+		if (!s.is_actionable) tr.style.opacity = "0.45";
+		if (qualityTier === "clean") tr.className = "row-strong";
+		else if (qualityTier === "compromised") tr.className = "row-watch";
+		else tr.className = "row-risk";
+
+		tr.innerHTML =
+			"<td><span class='badge " + decClass + "'>" + dec + "</span></td>" +
+			"<td><span class='badge verdict-label " + tierBadgeClass(qualityTier) + "' title='" + escAttr(verdict) + "'>" + esc(verdict) + "</span></td>" +
+			"<td style='" + confStyle + ";font-weight:700'>" + conf + "</td>" +
+			"<td><span class='badge " + stateClass + "'>" + state + "</span></td>" +
+			"<td><div class='token-cell'><div class='token-meta'><div class='token-actions'><a class='token-link mono' href='" + tokenHref + "' target='_blank' rel='noopener noreferrer'>" + mint.slice(0, 8) + "…</a><a class='exec-link' href='" + tokenHref + "' target='_blank' rel='noopener noreferrer'>GMGN</a></div><span class='token-sub'>" + qualityBadge + "</span></div></div></td>" +
+			"<td style='" + buyersStyle + "' title='raw/effective buyers after clustering'><div class='metric-stack'><span>" + rawBuyers + " raw / " + effBuyers + " eff</span><span class='metric-sub'>" + buyerQualityLabel(s) + "</span></div></td>" +
+			"<td title='cluster row status: " + escAttr(rowClusterStatus) + "; compression=" + clusterCompression + "'><div class='metric-stack'><span>" + clusterTrust + clusterFallbackBadge + "</span><span class='metric-sub'>" + clusterCompression + "</span></div></td>" +
+			"<td style='" + flowStyle + "'>" + buySol1m + "/" + sellSol1m + "</td>" +
+			"<td style='" + accelStyle + "'>" + accel + "</td>" +
+			"<td style='" + execStyle + "'>" + exec + "</td>" +
+			"<td style='" + advStyle + "'>" + adv + "</td>" +
+			"<td style='" + impactStyle + "'>" + impactPct + "%</td>" +
+			"<td class='dim'>" + ageMin + "m</td>" +
+			"<td>" + gatesCell + "</td>" +
+			"<td style='" + g1Style + "' title='" + g1Title + "'>" + liqMcPct + "</td>" +
+			"<td style='" + g4Style + "' title='" + g4Title + "'>" + volMcPct + "</td>" +
+			"<td class=\"why-now-cell\">" + esc(s.why_now) + "</td>" +
+			"<td class=\"blocker-cell\">" + esc(s.dominant_blocker || s.why_not_higher) + "</td>";
+		tbody.appendChild(tr);
+	}
+}
+
+function updateStatusStrip(ok, pollTime, snapshots, healthData) {
+	const healthEl = document.getElementById("ingestorHealth");
+	const clusterEl = document.getElementById("clusterStatus");
+	const pollEl = document.getElementById("lastPoll");
+	const modeEl = document.getElementById("storeMode");
+	const freshEl = document.getElementById("freshCount");
+	const banner = document.getElementById("clusterBanner");
+
+	if (!ok) {
+		healthEl.innerHTML = "<span class='status-dot dot-err'></span>Ingestor unreachable";
+		return;
+	}
+	healthEl.innerHTML = "<span class='status-dot dot-ok'></span>Ingestor OK";
+
+	// Clustering status from /healthz.
+	// Always resolve to a definitive show/hide — never leave banner in stale state.
+	{
+		const c = (healthData && healthData.clustering) ? healthData.clustering : null;
+		if (c) {
+			const cOK = c.healthy === true;
+			const backend = c.backend || "null";
+			const buyAllowed = c.buy_ready_allowed === true;
+			const timeoutFallbacks = c.timeout_fallbacks || 0;
+			const errorFallbacks = c.error_fallbacks || 0;
+			clusterEl.innerHTML = cOK
+				? "<span class='status-dot dot-ok'></span>cluster: " + backend + " t/o:" + timeoutFallbacks + " err:" + errorFallbacks
+				: "<span class='status-dot dot-err'></span>cluster: " + backend + " (degraded)";
+			// Show banner only when we have a definitive degraded signal.
+			banner.style.display = buyAllowed ? "none" : "block";
+		} else {
+			// Health endpoint unreachable — treat as unknown, hide banner
+			// (we already reported ingestor as OK above; don't contradict that).
+			clusterEl.innerHTML = "<span class='status-dot dot-warn'></span>cluster: unknown";
+			banner.style.display = "none";
+		}
+	}
+
+	if (pollTime) {
+		pollEl.textContent = "Last poll: " + pollTime.toLocaleTimeString();
+	}
+	if (snapshots) {
+		const fresh = (snapshots || []).filter(x => x.is_actionable).length;
+		const total = (snapshots || []).length;
+		const warming = fresh === 0;
+		modeEl.innerHTML = warming
+			? "<span style='color:#ffd76a'>Store: warming up</span>"
+			: "<span style='color:#7ef0b2'>Store: " + total + " tokens tracked</span>";
+		freshEl.textContent = fresh + " fresh actionable";
+	}
+}
+
+function startLivePolling() {
+	if (liveTimer) clearInterval(liveTimer);
+	liveTimer = setInterval(loadLive, CFG.refresh_interval * 1000);
+}
+
+// ---- helpers ----
+function td_badge(val, cls) {
+	return val
+		? "<td><span class='badge " + cls + "'>yes</span></td>"
+		: "<td><span class='badge no'>no</span></td>";
+}
+
+function setEmpty(msg, cols) {
+	const tbody = document.getElementById("tbody");
+	tbody.innerHTML = "<tr><td colspan='" + cols +
+		"' style='text-align:center;color:#8ea0c3;padding:32px'>" + msg + "</td></tr>";
+}
+
+function setError(msg, cols) {
+	const tbody = document.getElementById("tbody");
+	tbody.innerHTML = "<tr><td colspan='" + cols +
+		"' style='text-align:center;color:#f87171;padding:32px'>" + msg + "</td></tr>";
+}
+
+function esc(s) {
+	return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+function escAttr(s) {
+	return String(s).replace(/&/g,"&amp;").replace(/'/g,"&#39;").replace(/"/g,"&quot;");
+}
+
+function gateReasonList(eng) {
+	const gates = Array.isArray((eng || {}).gates) ? eng.gates : [];
+	return gates.filter(g => g && g.passed === false && !g.skipped && g.reason).map(g => g.reason).join(" | ");
+}
+
+function compactMissingStructure(reason) {
+	const text = String(reason || "").toLowerCase();
+	if (text.includes("holder balance")) return "no holder proxy";
+	if (text.includes("market cap")) return "no market cap";
+	if (text.includes("token not yet")) return "too young";
+	if (text.includes("not yet observed")) return "incomplete";
+	return "n/a";
+}
+
+function clusteringSurfaceLabel(s) {
+	const status = s.clustering_row_status || "resolved";
+	if (status === "resolved") return "clean";
+	if (status === "partial_fallback") return "partial fallback";
+	return "full fallback";
+}
+
+function buyerQualityLabel(s) {
+	const raw = s.buyers_last1m || 0;
+	const eff = s.effective_buyers_1m || 0;
+	if (raw === 0 && eff === 0) return "no real buy pressure";
+	if (raw > 0 && eff === 0) return "fully compressed";
+	if (eff < raw) return "compressed after clustering";
+	if ((s.funding_cluster_ratio || 0) === 0) return "organic buyer set";
+	return "mixed buyer quality";
+}
+
+function visualTier(verdict, s) {
+	const v = String(verdict || "").toLowerCase();
+	if (v.includes("clean-ish") || v.includes("best of bad tape")) return "compromised";
+	if ((s.decision === "BUY" || s.decision === "READY") && (s.clustering_row_status || "resolved") === "resolved") return "clean";
+	return "weak";
+}
+
+function visuallyClean(s) {
+	return visualTier(s.operator_verdict, s) !== "weak";
+}
+
+function chooseBestSetup(rows) {
+	if (!rows || rows.length === 0) return null;
+	const scored = [...rows].sort((a, b) => bestSetupScore(b) - bestSetupScore(a));
+	return scored[0] || null;
+}
+
+function bestSetupScore(s) {
+	let score = Number(s.confidence_score || 0);
+	if (s.is_actionable) score += 18;
+	if (s.decision === "BUY") score += 18;
+	if (s.decision === "READY") score += 12;
+	if (s.decision === "WATCH") score += 8;
+	if ((s.clustering_row_status || "resolved") === "resolved") score += 10;
+	if ((s.funding_cluster_ratio || 0) === 0) score += 6;
+	if ((s.estimated_impact_pct || 999) < 5) score += 8;
+	if ((s.execution_penalty || 0) >= 0.5) score += 8;
+	if ((s.market_cap_sol || 0) > 0) score += 4;
+	if ((s.adversarial_score || 1) > 0.75) score -= 10;
+	if ((s.clustering_row_status || "resolved") === "full_fallback") score -= 12;
+	return score;
+}
+
+function updateBestSetup(best, rows) {
+	const headline = document.getElementById("bestSetupHeadline");
+	const verdictEl = document.getElementById("bestSetupVerdict");
+	const blockerEl = document.getElementById("bestSetupBlocker");
+	const evidenceEl = document.getElementById("bestSetupEvidence");
+	const meta = document.getElementById("bestSetupMeta");
+	const marketCopy = document.getElementById("marketReadCopy");
+	const marketMeta = document.getElementById("marketReadMeta");
+	meta.innerHTML = "";
+	marketMeta.innerHTML = "";
+
+	const total = rows.length;
+	const clean = rows.filter(x => visuallyClean(x)).length;
+	const partial = rows.filter(x => (x.clustering_row_status || "resolved") === "partial_fallback").length;
+	const full = rows.filter(x => (x.clustering_row_status || "resolved") === "full_fallback").length;
+	const missingMC = rows.filter(x => !(x.market_cap_sol > 0)).length;
+	marketMeta.innerHTML =
+		"<span class='badge neutral'>" + total + " rows tracked</span>" +
+		"<span class='badge cleanflow'>" + clean + " structurally cleaner</span>" +
+		"<span class='badge partial'>" + (partial + full) + " fallback-affected</span>" +
+		"<span class='badge poison'>" + missingMC + " incomplete MC</span>";
+	if (total === 0) {
+		marketCopy.textContent = "No flow yet. The terminal stays quiet until there is enough structure to judge.";
+	} else if (clean === 0) {
+		marketCopy.textContent = "Current tape is active but not trustworthy yet. Most names are structurally weak, fallback-affected, or missing enough data to size with confidence.";
+	} else if ((partial + full) > clean) {
+		marketCopy.textContent = "There is some cleaner flow, but fallback and compression still dominate the screen. Treat most motion as suspicious before it proves otherwise.";
+	} else {
+		marketCopy.textContent = "A few names are structurally cleaner than the rest, but the terminal is still biased toward disqualifying weak flow over manufacturing excitement.";
+	}
+
+	if (!best) {
+		headline.textContent = "No high-conviction setup right now";
+		verdictEl.textContent = "";
+		blockerEl.textContent = "";
+		evidenceEl.textContent = "Waiting for enough live structure to judge.";
+		return;
+	}
+
+	const tier = visualTier(best.operator_verdict, best);
+	const whyNow = best.why_now;
+	const whyNot = best.dominant_blocker || best.why_not_higher;
+	const verdict = best.operator_verdict;
+	const shortMint = (best.mint || "").slice(0, 8) + "…";
+
+	if (tier === "clean" && best.is_actionable) {
+		headline.textContent = shortMint + " is the cleanest live setup";
+	} else if (best.decision === "WATCH" || best.decision === "READY" || best.decision === "BUY") {
+		headline.textContent = shortMint + " is the best available, not a free pass";
+	} else {
+		headline.textContent = "Best available, but still low-conviction";
+	}
+	verdictEl.textContent = verdict;
+	blockerEl.textContent = "Blocker: " + whyNot;
+	evidenceEl.textContent = whyNow;
+
+	meta.innerHTML =
+		"<span class='badge " + decisionBadgeClass(best.decision) + "'>" + (best.decision || "?") + "</span>" +
+		"<span class='badge verdict-label " + tierBadgeClass(tier) + "'>" + esc(verdict) + "</span>" +
+		"<span class='badge neutral'>conf " + Math.round(best.confidence_score || 0) + "</span>" +
+		"<span class='badge neutral'>" + clusteringSurfaceLabel(best) + "</span>";
+}
+
+function decisionBadgeClass(decision) {
+	if (decision === "BUY") return "buy";
+	if (decision === "READY") return "ready";
+	if (decision === "WATCH") return "watch";
+	return "avoid";
+}
+
+function tierBadgeClass(tier) {
+	if (tier === "clean") return "cleanflow";
+	if (tier === "compromised") return "partial";
+	return "poison";
+}
+
+function tierLabel(tier) {
+	if (tier === "clean") return "structurally clean";
+	if (tier === "compromised") return "partially compromised";
+	return "low confidence";
+}
+
+init();
+</script>
+</body>
+</html>

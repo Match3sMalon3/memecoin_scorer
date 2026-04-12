@@ -1,0 +1,7 @@
+ACTIONABILITY 'not actionable'
+PRIORITY 'best_on_tape'
+VERDICT 'structurally broken'
+BLOCKER 'impossible execution • thin liquidity'
+TRUST 'compromised'
+FOCUS 'best available now'
+BLANK_FIELDS []

@@ -426,8 +426,16 @@ func makeSnapshotsHandler(store *state.Store, dbStore *db.Store, liveCfg live.Li
 				DominantBlocker:           d.DominantBlocker,
 				OperatorVerdict:           d.OperatorVerdict,
 				ExecutionURL:              d.ExecutionURL,
+				HistoricalAnalogueSummary: d.HistoricalAnalogueSummary,
+				HistoricalOutcomeBand:     d.HistoricalOutcomeBand,
+				HistoricalTimeToOutcome:   d.HistoricalTimeToOutcome,
+				UpgradeTriggers:           d.UpgradeTriggers,
+				InvalidateTriggers:        d.InvalidateTriggers,
+				ActionabilityLabel:        d.ActionabilityLabel,
+				PriorityLabel:             d.PriorityLabel,
 				LastPriceSol:              s.LastPriceSOL,
 				MarketCapSol:              s.MarketCapSOL,
+				Layer0Reject:              d.Engine.Layer0Reject,
 				Engine:                    d.Engine,
 			}
 			scored.ExecutionURL = live.BuildExecutionURL(scored.Mint)
@@ -435,6 +443,12 @@ func makeSnapshotsHandler(store *state.Store, dbStore *db.Store, liveCfg live.Li
 			scored.WhyNotHigher = live.BuildWhyNotHigher(&scored)
 			scored.DominantBlocker = live.BuildDominantBlocker(&scored)
 			scored.OperatorVerdict = live.BuildOperatorVerdict(&scored)
+			scored.ActionabilityLabel = live.BuildActionabilityLabel(&scored)
+			scored.HistoricalAnalogueSummary = live.BuildHistoricalAnalogueSummary(&scored)
+			scored.HistoricalOutcomeBand = live.BuildHistoricalOutcomeBand(&scored)
+			scored.HistoricalTimeToOutcome = live.BuildHistoricalTimeToOutcome(&scored)
+			scored.UpgradeTriggers = live.BuildUpgradeTriggers(&scored)
+			scored.InvalidateTriggers = live.BuildInvalidateTriggers(&scored)
 			// Persist actionable BUY/READY signals to DB and emit console line.
 			if scored.IsActionable && (scored.Decision == "BUY" || scored.Decision == "READY") {
 				go dbStore.InsertSignal(context.WithoutCancel(r.Context()), scored)
@@ -454,6 +468,7 @@ func makeSnapshotsHandler(store *state.Store, dbStore *db.Store, liveCfg live.Li
 				break
 			}
 		}
+		live.AssignPriorityLabels(out)
 		log.Printf("snapshots api: snapshot_count=%d row_count=%d priced_rows=%d market_cap_rows=%d min_buyers=%d since_minutes=%d actionable_only=%t",
 			len(snapshots), len(out), pricedRows, marketCapRows, minBuyers, sinceMinutes, actionableOnly)
 
