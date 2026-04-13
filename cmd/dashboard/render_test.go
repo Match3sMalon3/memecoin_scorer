@@ -55,27 +55,31 @@ func TestRenderInitialRows_VisibleOperatorCells(t *testing.T) {
 	}
 }
 
-func TestRenderIndexHTML_ServerRendersBestSetupPanel(t *testing.T) {
+func TestRenderIndexHTML_ServerRendersPostureHeroScan(t *testing.T) {
 	app := &App{
 		cfg:              dashConfig{liveMode: true},
 		cachedLiveRows:   []map[string]any{sampleLiveRow()},
 		cachedLiveRowsAt: time.Now(),
 	}
 	html := app.renderIndexHTML()
-	if !strings.Contains(html, `id="best-setup-panel"`) {
-		t.Fatalf("best setup panel missing: %s", html)
+	for _, want := range []string{
+		`id="heroCard"`,
+		`id="heroName"`,
+		`id="heroPrimaryAction"`,
+		`id="heroSecondaryAction"`,
+		`id="primaryScanBody"`,
+		`id="rejectsPanel"`,
+		`BEST NOW`,
+		`DEX N/A`,
+		`<th>actions</th>`,
+		`VIEW [GMGN]`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("posture scan markup %q missing: %s", want, html)
+		}
 	}
-	if !strings.Contains(html, `Best Current Setup`) {
-		t.Fatalf("best setup title missing: %s", html)
-	}
-	if !strings.Contains(html, `<div class="verdict" id="bestSetupVerdict">structurally broken</div>`) {
-		t.Fatalf("best setup verdict missing: %s", html)
-	}
-	if !strings.Contains(html, `<div class="blocker" id="bestSetupBlocker">Blocker: impossible execution • thin liquidity</div>`) {
-		t.Fatalf("best setup blocker missing: %s", html)
-	}
-	if !strings.Contains(html, `<div class="evidence" id="bestSetupEvidence">5 eff buyers /1m • 5 eff buyers /5m • clean clustering</div>`) {
-		t.Fatalf("best setup evidence missing: %s", html)
+	if strings.Contains(html, `trigger = flow`) {
+		t.Fatalf("helper trigger copy should not render: %s", html)
 	}
 }
 
@@ -89,7 +93,7 @@ func TestIndexHTML_NoJSDerivationForBackendOwnedFields(t *testing.T) {
 		"https://gmgn.ai/sol/token/\" + encodeURIComponent(mint)",
 	}
 	for _, pattern := range forbidden {
-		if strings.Contains(indexHTML, pattern) {
+		if strings.Contains(indexHTML, pattern) || strings.Contains(wowIndexHTML, pattern) {
 			t.Fatalf("forbidden JS derivation present: %s", pattern)
 		}
 	}

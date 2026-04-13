@@ -498,6 +498,83 @@ func BuildExecutionURL(mint string) string {
 	return "https://gmgn.ai/sol/token/" + mint
 }
 
+func BuildDexscreenerURL(_ string) string {
+	return ""
+}
+
+func BuildQualityTier(s *model.LiveSnapshot) string {
+	if s.PriorityLabel == "best_on_tape" && s.ActionabilityLabel == "actionable now" {
+		return "APEX"
+	}
+	if s.PriorityLabel == "best_on_tape" {
+		return "NEAR"
+	}
+	if s.ActionabilityLabel == "observe closely" {
+		return "NEAR"
+	}
+	if s.TrustLabel == "insider-controlled" {
+		return "TRAP"
+	}
+	return "DEAD"
+}
+
+func BuildTriggerLine(s *model.LiveSnapshot) string {
+	var fragments []string
+	if s.EffectiveBuyers1m > 0 {
+		fragments = append(fragments, fmt.Sprintf("%d eff/1m", s.EffectiveBuyers1m))
+	} else {
+		fragments = append(fragments, "no flow")
+	}
+
+	if s.ClusteringRowStatus == "resolved" {
+		fragments = append(fragments, "clean")
+	} else if s.ClusteringRowStatus == "partial_fallback" {
+		fragments = append(fragments, "partial")
+	} else {
+		fragments = append(fragments, "fallback")
+	}
+
+	if s.Engine.Layer0Reject && s.LiquidityProxySOL > 0 {
+		fragments = append(fragments, fmt.Sprintf("liq %.2f", s.LiquidityProxySOL))
+	} else if s.EstimatedImpactPct > 0 {
+		fragments = append(fragments, fmt.Sprintf("impact %.1f", s.EstimatedImpactPct))
+	} else if s.LiquidityProxySOL > 0 {
+		fragments = append(fragments, fmt.Sprintf("liq %.2f", s.LiquidityProxySOL))
+	} else {
+		fragments = append(fragments, "thin liq")
+	}
+
+	if len(fragments) > 3 {
+		fragments = fragments[:3]
+	}
+	return strings.Join(fragments, " • ")
+}
+
+func BuildNoTradeReason(s *model.LiveSnapshot) string {
+	if s.Engine.Layer0Reject && s.LiquidityProxySOL > 0 && s.LiquidityProxySOL < 5 {
+		return fmt.Sprintf("liquidity %.2f SOL < 5 SOL minimum", s.LiquidityProxySOL)
+	}
+	if s.EstimatedImpactPct > 15 {
+		return fmt.Sprintf("impact %.1f%% > 15%% max", s.EstimatedImpactPct)
+	}
+	if s.ClusteringRowStatus == "partial_fallback" {
+		return "clustering partial fallback unresolved"
+	}
+	if s.ClusteringRowStatus == "full_fallback" {
+		return "clustering full fallback unresolved"
+	}
+	if s.Top10HolderPct >= 0.85 {
+		return fmt.Sprintf("top10 concentration %.1f%% > 85%% risk line", s.Top10HolderPct*100)
+	}
+	if s.EffectiveBuyers5m > 0 && s.EffectiveBuyers5m < 5 {
+		return fmt.Sprintf("effective buyers /5m %d < 5 minimum", s.EffectiveBuyers5m)
+	}
+	if strings.TrimSpace(s.DominantBlocker) != "" {
+		return s.DominantBlocker
+	}
+	return "no valid execution edge"
+}
+
 func BuildWhyNow(s *model.LiveSnapshot) string {
 	var r []string
 	if s.EffectiveBuyers1m > 0 {
@@ -703,6 +780,7 @@ func AssignPriorityLabels(rows []model.LiveSnapshot) {
 	for i := range rows {
 		rows[i].Layer0Reject = rows[i].Engine.Layer0Reject
 		rows[i].ExecutionURL = BuildExecutionURL(rows[i].Mint)
+		rows[i].DexscreenerURL = BuildDexscreenerURL(rows[i].Mint)
 		rows[i].WhyNow = BuildWhyNow(&rows[i])
 		rows[i].WhyNotHigher = BuildWhyNotHigher(&rows[i])
 		rows[i].DominantBlocker = BuildDominantBlocker(&rows[i])
@@ -720,6 +798,9 @@ func AssignPriorityLabels(rows []model.LiveSnapshot) {
 		rows[i].TrustReason = BuildTrustReason(&rows[i])
 		rows[i].AsymmetryLabel = BuildAsymmetryLabel(&rows[i])
 		rows[i].AsymmetryReason = BuildAsymmetryReason(&rows[i])
+		rows[i].QualityTier = BuildQualityTier(&rows[i])
+		rows[i].TriggerLine = BuildTriggerLine(&rows[i])
+		rows[i].NoTradeReason = BuildNoTradeReason(&rows[i])
 	}
 }
 

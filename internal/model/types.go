@@ -237,6 +237,14 @@ type LiveSnapshot struct {
 	OperatorVerdict string `json:"operator_verdict"`
 	// ExecutionURL is a direct click-through helper for operator execution context.
 	ExecutionURL string `json:"execution_url"`
+	// DexscreenerURL is a direct DexScreener click-through when a real URL is known.
+	DexscreenerURL string `json:"dexscreener_url"`
+	// QualityTier is the compact posture tier used by the operator hero/table.
+	QualityTier string `json:"quality_tier"`
+	// TriggerLine is the compact scan trigger line used by the operator hero/table.
+	TriggerLine string `json:"trigger_line"`
+	// NoTradeReason is the compact blocker line used when execution is not pristine.
+	NoTradeReason string `json:"no_trade_reason"`
 
 	PriorityLabel             string `json:"priority_label"`
 	ActionabilityLabel        string `json:"actionability_label"`

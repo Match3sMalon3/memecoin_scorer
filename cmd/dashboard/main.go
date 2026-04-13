@@ -489,6 +489,8 @@ func (a *App) handleIndex(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (a *App) renderIndexHTML() string {
+	return a.renderWowIndexHTML()
+
 	page := indexHTML
 	bestHeadlineValue := "No high-conviction setup right now"
 	bestVerdictValue := ""
@@ -750,6 +752,417 @@ func renderInitialRows(rows []map[string]any) string {
 		)
 	}
 	return b.String()
+}
+
+func (a *App) renderWowIndexHTML() string {
+	var rows []map[string]any
+	if a.cfg.liveMode {
+		rows = a.getCachedLiveRows(10 * time.Minute)
+		if len(rows) == 0 {
+			var err error
+			rows, err = a.loadLiveRows(0, 240, 20, false)
+			if err != nil {
+				log.Printf("renderWowIndexHTML: live bootstrap unavailable: %v", err)
+				rows = nil
+			} else {
+				a.setCachedLiveRows(rows)
+			}
+		}
+	}
+
+	primaryRows := rankedWowRows(rows, false)
+	rejectRows := rankedWowRows(rows, true)
+	var best map[string]any
+	if len(primaryRows) > 0 {
+		best = primaryRows[0]
+	}
+
+	posture := wowPagePosture(primaryRows, best)
+	pagePostureText := "NO TRADE"
+	verdictBar := "NO CANDIDATES WORTH MONITORING."
+	heroPrimaryText := "NO TRADE"
+	heroPrimaryClass := "btn btn-disabled"
+	heroPrimaryHref := "#"
+	heroName := "NO LIVE CANDIDATE"
+	heroMeta := "n/a"
+	heroState := "AVOID"
+	heroQuality := "DEAD"
+	heroTrigger := "no valid execution edge"
+	heroBlocker := "no valid execution edge"
+	heroDex := wowDisabledDexHTML("heroSecondaryAction", "btn btn-disabled")
+
+	if best != nil {
+		heroName = wowTokenLabel(best)
+		heroMeta = shortAddress(stringFieldMap(best, "mint"))
+		heroState = wowStateText(best)
+		heroQuality = wowQualityTier(best)
+		heroTrigger = wowTriggerLine(best)
+		heroBlocker = wowFullBlocker(best, heroState)
+		heroPrimaryHref = firstNonEmpty(stringFieldMap(best, "execution_url"), "#")
+		heroDex = wowHeroDexHTML(best)
+	}
+
+	switch posture {
+	case "pristine":
+		pagePostureText = "SYSTEM: NOMINAL"
+		verdictBar = "HIGH CONVICTION SETUP DETECTED. EXECUTION ENABLED."
+		heroPrimaryText = "EXECUTE [GMGN]"
+		heroPrimaryClass = "btn btn-exec"
+		heroBlocker = ""
+	case "defensive":
+		pagePostureText = "POSTURE: DEFENSIVE"
+		verdictBar = "BAD TAPE DETECTED. NO TRADE ZONE."
+		heroPrimaryText = "VIEW [GMGN]"
+		heroPrimaryClass = "btn btn-view"
+		if heroBlocker == "" || heroBlocker == "none" {
+			heroBlocker = "no valid execution edge"
+		}
+	}
+
+	replacements := map[string]string{
+		"__PAGE_POSTURE_CLASS__":    posture,
+		"__PAGE_POSTURE_TEXT__":     html.EscapeString(pagePostureText),
+		"__PAGE_SYSTEM_META__":      html.EscapeString(fmt.Sprintf("%d primary • %d rejects", len(primaryRows), len(rejectRows))),
+		"__PAGE_VERDICT_BAR__":      html.EscapeString(verdictBar),
+		"__HERO_NAME__":             html.EscapeString(heroName),
+		"__HERO_META__":             html.EscapeString(heroMeta),
+		"__HERO_STATE_CLASS__":      wowStateBadgeClass(heroState),
+		"__HERO_STATE__":            html.EscapeString(heroState),
+		"__HERO_QUALITY_CLASS__":    wowQualityBadgeClass(heroQuality),
+		"__HERO_QUALITY__":          html.EscapeString(heroQuality),
+		"__HERO_TRIGGER_LINE__":     html.EscapeString(heroTrigger),
+		"__HERO_SUPERIORITY__":      html.EscapeString(wowSuperiorityLine(heroQuality)),
+		"__HERO_NO_TRADE_REASON__":  html.EscapeString(heroBlocker),
+		"__HERO_PRIMARY_HREF__":     html.EscapeString(heroPrimaryHref),
+		"__HERO_PRIMARY_CLASS__":    heroPrimaryClass,
+		"__HERO_PRIMARY_TEXT__":     html.EscapeString(heroPrimaryText),
+		"__HERO_SECONDARY_ACTION__": heroDex,
+		"__PRIMARY_SCAN_ROWS__":     renderWowScanRows(primaryRows, best, posture, false),
+		"__REJECT_SCAN_ROWS__":      renderWowScanRows(rejectRows, best, posture, true),
+	}
+
+	page := wowIndexHTML
+	for placeholder, value := range replacements {
+		page = strings.ReplaceAll(page, placeholder, value)
+	}
+	return page
+}
+
+func rankedWowRows(rows []map[string]any, rejects bool) []map[string]any {
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		if wowIsReject(row) == rejects {
+			out = append(out, row)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return wowRankScore(out[i]) > wowRankScore(out[j])
+	})
+	return out
+}
+
+func wowRankScore(row map[string]any) float64 {
+	score := bestSetupScoreGo(row)
+	switch stringFieldMap(row, "priority_label") {
+	case "best_on_tape", "priority: best_on_tape":
+		score += 10000
+	case "monitor_for_upgrade", "priority: monitor_for_upgrade":
+		score += 5000
+	}
+	if wowIsPristine(row) {
+		score += 2000
+	}
+	return score
+}
+
+func wowIsReject(row map[string]any) bool {
+	return stringFieldMap(row, "priority_label") == "deprioritize"
+}
+
+func wowPagePosture(primaryRows []map[string]any, best map[string]any) string {
+	if len(primaryRows) == 0 || best == nil {
+		return "no-trade"
+	}
+	if wowIsPristine(best) {
+		return "pristine"
+	}
+	return "defensive"
+}
+
+func wowIsPristine(row map[string]any) bool {
+	return stringFieldMap(row, "actionability_label") == "actionable now" &&
+		stringFieldMap(row, "clustering_row_status") == "resolved" &&
+		stringFieldMap(row, "trust_label") != "insider-controlled" &&
+		!engineLayer0RejectGo(row)
+}
+
+func engineLayer0RejectGo(row map[string]any) bool {
+	eng, ok := row["engine"].(map[string]any)
+	if !ok {
+		return false
+	}
+	return boolFieldMap(eng, "layer0_reject")
+}
+
+func renderWowScanRows(rows []map[string]any, best map[string]any, posture string, rejects bool) string {
+	var b strings.Builder
+	for _, row := range rows {
+		state := wowStateText(row)
+		fullBlocker := wowFullBlocker(row, state)
+		rowClass := wowRowClass(row, best, state, rejects)
+		bestChip := ""
+		if !rejects && wowSameMint(row, best) {
+			bestChip = `<span class="rank-chip">BEST NOW</span>`
+		}
+		fmt.Fprintf(&b,
+			`<tr class="scan-row %s"><td><span class="badge %s">%s</span></td><td class="conf-cell">%d</td><td><div class="token-line"><span class="token-main">%s</span>%s</div><div class="token-sub">CA %s</div></td><td><div class="blocker %s" title="%s">%s</div></td><td><div class="trigger">%s</div></td><td>%s</td></tr>`,
+			html.EscapeString(rowClass),
+			wowStateBadgeClass(state), html.EscapeString(state),
+			int(floatFieldMap(row, "confidence_score")+0.5),
+			html.EscapeString(wowTokenLabel(row)),
+			bestChip,
+			html.EscapeString(shortAddress(stringFieldMap(row, "mint"))),
+			wowBlockerClass(row, state, fullBlocker), html.EscapeString(fullBlocker), html.EscapeString(wowCompactBlocker(fullBlocker)),
+			html.EscapeString(wowTriggerLine(row)),
+			wowRowActionsHTML(row, posture, state),
+		)
+	}
+	if b.Len() == 0 {
+		return `<tr class="scan-row empty"><td colspan="6">NO ROWS</td></tr>`
+	}
+	return b.String()
+}
+
+func wowSameMint(a map[string]any, b map[string]any) bool {
+	return a != nil && b != nil && stringFieldMap(a, "mint") == stringFieldMap(b, "mint")
+}
+
+func wowRowClass(row map[string]any, best map[string]any, state string, rejects bool) string {
+	if rejects {
+		return "reject"
+	}
+	if wowSameMint(row, best) {
+		return "best"
+	}
+	if state == "WATCH" {
+		return "watch"
+	}
+	return ""
+}
+
+func wowStateText(row map[string]any) string {
+	actionability := strings.ToLower(strings.TrimSpace(stringFieldMap(row, "actionability_label")))
+	decision := stringFieldMap(row, "decision")
+	if actionability == "actionable now" || decision == "BUY" || decision == "READY" {
+		return "READY"
+	}
+	if strings.Contains(actionability, "observe") ||
+		strings.Contains(actionability, "monitor") ||
+		decision == "WATCH" ||
+		stringFieldMap(row, "priority_label") == "monitor_for_upgrade" {
+		return "WATCH"
+	}
+	return "AVOID"
+}
+
+func wowStateBadgeClass(state string) string {
+	switch state {
+	case "READY":
+		return "ready"
+	case "WATCH":
+		return "watch"
+	default:
+		return "avoid"
+	}
+}
+
+func wowQualityTier(row map[string]any) string {
+	return firstNonEmpty(stringFieldMap(row, "quality_tier"), "DEAD")
+}
+
+func wowQualityBadgeClass(tier string) string {
+	switch tier {
+	case "APEX":
+		return "apex"
+	case "NEAR":
+		return "near"
+	case "TRAP":
+		return "trap"
+	default:
+		return "dead"
+	}
+}
+
+func wowTokenLabel(row map[string]any) string {
+	mint := stringFieldMap(row, "mint")
+	for _, key := range []string{"token_symbol", "symbol", "base_token_symbol"} {
+		if label := strings.TrimSpace(stringFieldMap(row, key)); wowSaneSymbol(label, mint) {
+			return label
+		}
+	}
+	return shortAddress(mint)
+}
+
+func wowSaneSymbol(label string, mint string) bool {
+	if label == "" || label == mint || len(label) > 16 {
+		return false
+	}
+	lower := strings.ToLower(label)
+	return !strings.Contains(lower, "http") && !strings.Contains(label, "/")
+}
+
+func shortAddress(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= 12 {
+		return value
+	}
+	return value[:6] + "..." + value[len(value)-4:]
+}
+
+func wowFullBlocker(row map[string]any, state string) string {
+	if state == "READY" && wowIsPristine(row) {
+		return "none"
+	}
+	return firstNonEmpty(
+		stringFieldMap(row, "no_trade_reason"),
+		stringFieldMap(row, "dominant_blocker"),
+		stringFieldMap(row, "why_not_higher"),
+		"no valid execution edge",
+	)
+}
+
+func wowCompactBlocker(reason string) string {
+	text := strings.TrimSpace(reason)
+	lower := strings.ToLower(text)
+	switch {
+	case text == "" || lower == "none":
+		return "none"
+	case strings.Contains(lower, "partial_fallback") || strings.Contains(lower, "partial fallback"):
+		return "partial fallback"
+	case strings.Contains(lower, "full_fallback") || strings.Contains(lower, "full fallback"):
+		return "full fallback"
+	case strings.Contains(lower, "thin liquidity"):
+		return "thin liquidity"
+	case strings.Contains(lower, "liquidity"):
+		fields := strings.Fields(text)
+		if len(fields) >= 5 {
+			return fmt.Sprintf("liq %s < %s", fields[1], fields[4])
+		}
+	case strings.HasPrefix(lower, "impact"):
+		fields := strings.Fields(text)
+		if len(fields) >= 4 {
+			return fmt.Sprintf("impact %s > %s", strings.TrimSuffix(fields[1], "%"), strings.TrimSuffix(fields[3], "%"))
+		}
+	case strings.HasPrefix(lower, "top10"):
+		fields := strings.Fields(text)
+		if len(fields) >= 5 {
+			return fmt.Sprintf("top10 %s > %s", strings.TrimSuffix(fields[2], "%"), strings.TrimSuffix(fields[4], "%"))
+		}
+	case strings.Contains(lower, "effective buyers"):
+		fields := strings.Fields(text)
+		if len(fields) >= 6 {
+			return fmt.Sprintf("buyers %s < %s", fields[3], fields[5])
+		}
+	case lower == "no valid execution edge":
+		return "no edge"
+	}
+
+	words := strings.Fields(text)
+	if len(words) > 4 {
+		words = words[:4]
+	}
+	return strings.Join(words, " ")
+}
+
+func wowBlockerClass(row map[string]any, state string, blocker string) string {
+	if strings.TrimSpace(blocker) == "" || blocker == "none" {
+		return ""
+	}
+	text := strings.ToLower(blocker + " " + stringFieldMap(row, "trust_label"))
+	if strings.Contains(text, "liquidity") ||
+		strings.Contains(text, "impact") ||
+		strings.Contains(text, "fallback") ||
+		strings.Contains(text, "concentration") ||
+		strings.Contains(text, "insider") ||
+		strings.Contains(text, "execution") ||
+		strings.Contains(text, "reject") ||
+		strings.Contains(text, "compromised") {
+		return "red"
+	}
+	if state == "WATCH" {
+		return "amber"
+	}
+	return ""
+}
+
+func wowTriggerLine(row map[string]any) string {
+	if line := strings.TrimSpace(stringFieldMap(row, "trigger_line")); line != "" {
+		return line
+	}
+	flow := "no flow"
+	if eff := int(floatFieldMap(row, "effective_buyers_1m")); eff > 0 {
+		flow = fmt.Sprintf("%d eff/1m", eff)
+	}
+	cluster := "fallback"
+	if status := stringFieldMap(row, "clustering_row_status"); status == "resolved" {
+		cluster = "clean"
+	} else if status == "partial_fallback" {
+		cluster = "partial"
+	}
+	exec := "thin liq"
+	if liq := floatFieldMap(row, "liquidity_proxy_sol"); engineLayer0RejectGo(row) && liq > 0 {
+		exec = fmt.Sprintf("liq %.2f", liq)
+	} else if impact := floatFieldMap(row, "estimated_impact_pct"); impact > 0 {
+		exec = fmt.Sprintf("impact %.1f", impact)
+	} else if liq > 0 {
+		exec = fmt.Sprintf("liq %.2f", liq)
+	}
+	return strings.Join([]string{flow, cluster, exec}, " • ")
+}
+
+func wowSuperiorityLine(tier string) string {
+	switch tier {
+	case "APEX":
+		return "Apex candidate: real demand meeting executable structure."
+	case "NEAR":
+		return "Best available but still short of valid execution."
+	case "TRAP":
+		return "Likely distribution trap. Do not chase."
+	default:
+		return "No material edge versus the rest of the tape."
+	}
+}
+
+func wowRowActionsHTML(row map[string]any, posture string, state string) string {
+	actionText := "VIEW [GMGN]"
+	if posture == "pristine" && state == "READY" {
+		actionText = "EXECUTE [GMGN]"
+	}
+	var b strings.Builder
+	b.WriteString(`<div class="action-stack">`)
+	if href := strings.TrimSpace(stringFieldMap(row, "execution_url")); href != "" {
+		fmt.Fprintf(&b, `<a class="action-link gmgn" href="%s" target="_blank" rel="noopener noreferrer">%s</a>`, html.EscapeString(href), html.EscapeString(actionText))
+	} else {
+		b.WriteString(`<span class="action-link muted">GMGN N/A</span>`)
+	}
+	if href := strings.TrimSpace(stringFieldMap(row, "dexscreener_url")); href != "" {
+		fmt.Fprintf(&b, `<a class="action-link dex" href="%s" target="_blank" rel="noopener noreferrer">DEXSCREENER</a>`, html.EscapeString(href))
+	} else {
+		b.WriteString(`<span class="action-link muted">DEX N/A</span>`)
+	}
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+func wowHeroDexHTML(row map[string]any) string {
+	if href := strings.TrimSpace(stringFieldMap(row, "dexscreener_url")); href != "" {
+		return fmt.Sprintf(`<a id="heroSecondaryAction" href="%s" class="btn btn-dex" target="_blank" rel="noopener noreferrer">DEXSCREENER</a>`, html.EscapeString(href))
+	}
+	return wowDisabledDexHTML("heroSecondaryAction", "btn btn-disabled")
+}
+
+func wowDisabledDexHTML(id string, className string) string {
+	return fmt.Sprintf(`<span id="%s" class="%s">DEX N/A</span>`, html.EscapeString(id), html.EscapeString(className))
 }
 
 func bestHeadline(rows []map[string]any) string {
@@ -1228,6 +1641,474 @@ func firstNonEmpty(values ...string) string {
 	}
 	return ""
 }
+
+const wowIndexHTML = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Structural Quality Filter</title>
+<style>
+:root{
+  --bg:#050505;
+  --panel:#090909;
+  --panel-2:#0c0c0c;
+  --border:#1d1d1d;
+  --text:#f1f1f1;
+  --muted:#787878;
+  --green:#00ff66;
+  --green-bg:#06180d;
+  --amber:#ffcc00;
+  --amber-bg:#191400;
+  --red:#ff4d4d;
+  --red-bg:#1a0707;
+  --blue:#62b0ff;
+  --blue-bg:#07131f;
+  --mono:"JetBrains Mono","SFMono-Regular","Menlo","Consolas",monospace;
+}
+html,body{
+  background:var(--bg);
+  color:var(--text);
+  margin:0;
+  padding:0;
+  font-family:var(--mono);
+  font-size:11px;
+}
+.operator-shell{
+  min-height:100vh;
+  background:var(--bg);
+}
+.topbar{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:8px 14px;
+  border-bottom:1px solid var(--border);
+  background:#070707;
+}
+.topbar-left{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+}
+.eyebrow{
+  color:var(--muted);
+  font-size:9px;
+  font-weight:800;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+.health-pill,.badge{
+  display:inline-flex;
+  align-items:center;
+  border-radius:3px;
+  border:1px solid var(--border);
+  font-weight:900;
+  text-transform:uppercase;
+}
+.health-pill{
+  gap:6px;
+  padding:3px 8px;
+  font-size:9px;
+}
+.badge{
+  padding:3px 7px;
+  font-size:9px;
+}
+.health-pill.pristine,.badge.ready,.badge.apex{
+  color:var(--green);
+  background:var(--green-bg);
+  border-color:rgba(0,255,102,.4);
+}
+.health-pill.defensive,.badge.watch,.badge.near{
+  color:var(--amber);
+  background:var(--amber-bg);
+  border-color:rgba(255,204,0,.4);
+}
+.health-pill.no-trade,.badge.avoid,.badge.trap{
+  color:var(--red);
+  background:var(--red-bg);
+  border-color:rgba(255,77,77,.4);
+}
+.badge.dead{
+  color:#aaa;
+  background:#111;
+}
+.topbar-meta{
+  color:var(--muted);
+  font-size:10px;
+}
+.verdict-bar{
+  padding:10px 14px;
+  font-size:13px;
+  font-weight:900;
+  letter-spacing:-.02em;
+  border-bottom:1px solid var(--border);
+}
+.verdict-bar.pristine{
+  background:#06180d;
+  color:var(--green);
+  border-bottom:2px solid var(--green);
+}
+.verdict-bar.defensive{
+  background:#191400;
+  color:var(--amber);
+  border-bottom:2px solid var(--amber);
+}
+.verdict-bar.no-trade{
+  background:#1a0707;
+  color:var(--red);
+  border-bottom:2px solid var(--red);
+}
+.hero{
+  display:grid;
+  grid-template-columns:220px 1fr 200px;
+  gap:16px;
+  align-items:center;
+  padding:12px 14px;
+  border-bottom:1px solid var(--border);
+  background:linear-gradient(180deg,#0a0a0a,#070707);
+}
+.hero.pristine{
+  box-shadow:inset 4px 0 0 var(--green);
+}
+.hero.defensive{
+  background:linear-gradient(180deg,#131000,#080700);
+  box-shadow:inset 4px 0 0 var(--amber);
+}
+.hero.no-trade{
+  background:linear-gradient(180deg,#120707,#070404);
+  box-shadow:inset 4px 0 0 var(--red);
+}
+.hero-left,.hero-middle{
+  min-width:0;
+}
+.hero-name{
+  margin:0;
+  font-size:21px;
+  line-height:1;
+  font-weight:900;
+  color:#fff;
+}
+.hero-meta{
+  margin-top:5px;
+  color:var(--muted);
+  font-size:10px;
+}
+.badge-row{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  margin-top:8px;
+}
+.hero-middle{
+  border-left:2px solid var(--green);
+  padding-left:14px;
+}
+.hero.defensive .hero-middle{
+  border-left-color:var(--amber);
+}
+.hero.no-trade .hero-middle{
+  border-left-color:var(--red);
+}
+.hero-trigger{
+  color:#fff;
+  font-size:13px;
+  font-weight:800;
+  line-height:1.3;
+}
+.hero-superiority{
+  margin-top:6px;
+  color:var(--green);
+  font-size:10px;
+  font-style:italic;
+}
+.hero.defensive .hero-superiority{
+  color:var(--amber);
+}
+.hero.no-trade .hero-superiority{
+  color:var(--red);
+}
+.hero-reason{
+  min-height:13px;
+  margin-top:6px;
+  color:var(--red);
+  font-size:10px;
+  font-weight:700;
+}
+.hero-right{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+.btn{
+  display:block;
+  width:100%;
+  box-sizing:border-box;
+  text-align:center;
+  padding:10px 8px;
+  border-radius:3px;
+  text-decoration:none;
+  font-weight:950;
+  font-size:11px;
+  border:1px solid transparent;
+}
+.btn-exec{
+  background:var(--green);
+  color:#000;
+  box-shadow:0 0 18px rgba(0,255,102,.18);
+}
+.btn-view{
+  background:var(--amber);
+  color:#000;
+  box-shadow:0 0 18px rgba(255,204,0,.14);
+}
+.btn-dex{
+  background:var(--blue-bg);
+  color:var(--blue);
+  border-color:rgba(98,176,255,.45);
+}
+.btn-disabled{
+  background:#111;
+  color:#555;
+  border-color:var(--border);
+  pointer-events:none;
+}
+.table-wrap{
+  padding-bottom:14px;
+}
+.scan-table{
+  width:100%;
+  border-collapse:collapse;
+}
+.scan-table thead th{
+  position:sticky;
+  top:0;
+  z-index:1;
+  padding:8px 10px;
+  text-align:left;
+  color:var(--muted);
+  background:#070707;
+  border-bottom:1px solid var(--border);
+  font-size:9px;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+.scan-table tbody td{
+  padding:8px 10px;
+  border-bottom:1px solid var(--border);
+  vertical-align:middle;
+}
+.scan-row:hover{
+  background:#0b0b0b;
+}
+.scan-row.best{
+  background:linear-gradient(90deg,rgba(0,255,102,.13),rgba(0,255,102,.03));
+  box-shadow:inset 5px 0 0 var(--green);
+}
+.scan-row.watch{
+  background:rgba(255,204,0,.035);
+  box-shadow:inset 3px 0 0 var(--amber);
+}
+.scan-row.reject{
+  opacity:.66;
+}
+.scan-row.empty td{
+  color:var(--muted);
+  text-align:center;
+}
+.conf-cell{
+  color:#fff;
+  font-weight:900;
+}
+.token-line{
+  display:flex;
+  align-items:center;
+  gap:7px;
+}
+.token-main{
+  color:#fff;
+  font-size:12px;
+  font-weight:900;
+}
+.token-sub{
+  margin-top:3px;
+  color:var(--muted);
+  font-size:9px;
+}
+.rank-chip{
+  display:inline-flex;
+  align-items:center;
+  padding:2px 5px;
+  border-radius:3px;
+  color:#000;
+  background:var(--green);
+  font-size:8px;
+  font-weight:950;
+}
+.blocker{
+  color:#cfcfcf;
+  font-size:10px;
+  font-weight:700;
+  white-space:nowrap;
+}
+.blocker.red{
+  color:#ff8b8b;
+}
+.blocker.amber{
+  color:var(--amber);
+}
+.trigger{
+  color:#e2e2e2;
+  font-size:10px;
+  white-space:nowrap;
+}
+.action-stack{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  white-space:nowrap;
+}
+.action-link{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-width:58px;
+  padding:5px 7px;
+  border-radius:3px;
+  border:1px solid transparent;
+  text-decoration:none;
+  font-size:9px;
+  font-weight:950;
+}
+.action-link.gmgn{
+  color:#000;
+  background:var(--green);
+}
+.action-link.dex{
+  color:var(--blue);
+  background:var(--blue-bg);
+  border-color:rgba(98,176,255,.45);
+}
+.action-link.muted{
+  color:#606060;
+  background:#101010;
+  border-color:var(--border);
+}
+.secondary-panel{
+  margin-top:6px;
+  border-top:1px solid var(--border);
+}
+.secondary-panel details{
+  border-top:1px solid var(--border);
+}
+.secondary-panel summary{
+  list-style:none;
+  cursor:pointer;
+  padding:10px 14px;
+  color:var(--muted);
+  background:#070707;
+  font-size:9px;
+  font-weight:900;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+.secondary-panel summary::-webkit-details-marker{
+  display:none;
+}
+@media (max-width: 980px){
+  .hero{
+    grid-template-columns:1fr;
+  }
+  .hero-right{
+    width:100%;
+  }
+  .trigger,.blocker{
+    white-space:normal;
+  }
+  .action-stack{
+    flex-wrap:wrap;
+  }
+}
+</style>
+</head>
+<body>
+<div class="operator-shell">
+  <div class="topbar">
+    <div class="topbar-left">
+      <div class="eyebrow">Structural Quality Filter</div>
+      <div id="pagePostureHeader" class="health-pill __PAGE_POSTURE_CLASS__">__PAGE_POSTURE_TEXT__</div>
+      <div class="topbar-meta" id="pageSystemMeta">__PAGE_SYSTEM_META__</div>
+    </div>
+  </div>
+
+  <div id="pageVerdictBar" class="verdict-bar __PAGE_POSTURE_CLASS__">__PAGE_VERDICT_BAR__</div>
+
+  <section id="heroCard" class="hero __PAGE_POSTURE_CLASS__">
+    <div class="hero-left">
+      <h1 id="heroName" class="hero-name">__HERO_NAME__</h1>
+      <div id="heroMeta" class="hero-meta">CA: __HERO_META__</div>
+      <div class="badge-row">
+        <div id="heroStateBadge" class="badge __HERO_STATE_CLASS__">__HERO_STATE__</div>
+        <div id="heroQualityBadge" class="badge __HERO_QUALITY_CLASS__">__HERO_QUALITY__</div>
+      </div>
+    </div>
+
+    <div class="hero-middle">
+      <div id="heroTriggerLine" class="hero-trigger">__HERO_TRIGGER_LINE__</div>
+      <div id="heroSuperiority" class="hero-superiority">__HERO_SUPERIORITY__</div>
+      <div id="heroNoTradeReason" class="hero-reason">__HERO_NO_TRADE_REASON__</div>
+    </div>
+
+    <div class="hero-right">
+      <a id="heroPrimaryAction" href="__HERO_PRIMARY_HREF__" class="__HERO_PRIMARY_CLASS__" target="_blank" rel="noopener noreferrer">__HERO_PRIMARY_TEXT__</a>
+      __HERO_SECONDARY_ACTION__
+    </div>
+  </section>
+
+  <div class="table-wrap">
+    <table class="scan-table">
+      <thead>
+        <tr>
+          <th>state</th>
+          <th>conf</th>
+          <th>token</th>
+          <th>blocker</th>
+          <th>trigger</th>
+          <th>actions</th>
+        </tr>
+      </thead>
+      <tbody id="primaryScanBody">
+        __PRIMARY_SCAN_ROWS__
+      </tbody>
+    </table>
+
+    <div class="secondary-panel">
+      <details id="rejectsPanel">
+        <summary>Show rejects</summary>
+        <table class="scan-table">
+          <thead>
+            <tr>
+              <th>state</th>
+              <th>conf</th>
+              <th>token</th>
+              <th>blocker</th>
+              <th>trigger</th>
+              <th>actions</th>
+            </tr>
+          </thead>
+          <tbody id="rejectScanBody">
+            __REJECT_SCAN_ROWS__
+          </tbody>
+        </table>
+      </details>
+    </div>
+  </div>
+</div>
+</body>
+</html>`
 
 const indexHTML = `<!doctype html>
 <html lang="en">
