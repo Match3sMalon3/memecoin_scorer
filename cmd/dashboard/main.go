@@ -489,267 +489,304 @@ func (a *App) handleIndex(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (a *App) renderIndexHTML() string {
-	page := indexHTML
-	bestHeadlineValue := "No high-conviction setup right now"
-	bestVerdictValue := ""
-	bestBlockerValue := ""
-	bestEvidenceValue := "Waiting for enough live structure to judge."
-	bestActionabilityValue := ""
-	bestPriorityValue := ""
-	bestFocusValue := ""
-	bestRelativeValue := ""
-	bestTrustValue := ""
-	bestTrustReasonValue := ""
-	bestAsymmetryLabelValue := ""
-	bestAsymmetryReasonValue := ""
-	bestVerdictLineValue := ""
-	bestBlockerLineValue := ""
-	bestWhyNowValue := ""
-	bestAnalogueValue := ""
-	bestOutcomeValue := ""
-	bestTimingValue := ""
-	bestUpgradeValue := ""
-	bestInvalidateValue := ""
-	bestMetaValue := ""
-	marketCopyValue := "Anyone can see motion. This terminal tries to distinguish organic emergence from compressed, fallback-affected, or structurally poisoned flow."
-	marketMetaValue := ""
-	initialBodyValue := ""
-	if !a.cfg.liveMode {
-		page = strings.ReplaceAll(page, "__INITIAL_BEST_HEADLINE__", html.EscapeString(bestHeadlineValue))
-		page = strings.ReplaceAll(page, "__INITIAL_BEST_VERDICT__", html.EscapeString(bestVerdictValue))
-		page = strings.ReplaceAll(page, "__INITIAL_BEST_BLOCKER__", html.EscapeString(bestBlockerValue))
-		page = strings.ReplaceAll(page, "__INITIAL_BEST_EVIDENCE__", bestEvidenceValue)
-		page = strings.ReplaceAll(page, "__INITIAL_BEST_ACTIONABILITY__", bestActionabilityValue)
-		page = strings.ReplaceAll(page, "__INITIAL_BEST_PRIORITY__", bestPriorityValue)
-		page = strings.ReplaceAll(page, "__INITIAL_BEST_FOCUS__", bestFocusValue)
-		page = strings.ReplaceAll(page, "__INITIAL_BEST_RELATIVE__", bestRelativeValue)
-		page = strings.ReplaceAll(page, "__INITIAL_BEST_TRUST__", bestTrustValue)
-		page = strings.ReplaceAll(page, "__INITIAL_BEST_TRUST_REASON__", bestTrustReasonValue)
-		page = strings.ReplaceAll(page, "__INITIAL_BEST_ASYMMETRY_LABEL__", bestAsymmetryLabelValue)
-		page = strings.ReplaceAll(page, "__INITIAL_BEST_ASYMMETRY_REASON__", bestAsymmetryReasonValue)
-		page = strings.ReplaceAll(page, "__INITIAL_BEST_VERDICT_LINE__", bestVerdictLineValue)
-		page = strings.ReplaceAll(page, "__INITIAL_BEST_BLOCKER_LINE__", bestBlockerLineValue)
-		page = strings.ReplaceAll(page, "__INITIAL_BEST_WHY_NOW__", bestWhyNowValue)
-		page = strings.ReplaceAll(page, "__INITIAL_BEST_ANALOGUE__", bestAnalogueValue)
-		page = strings.ReplaceAll(page, "__INITIAL_BEST_OUTCOME__", bestOutcomeValue)
-		page = strings.ReplaceAll(page, "__INITIAL_BEST_TIMING__", bestTimingValue)
-		page = strings.ReplaceAll(page, "__INITIAL_BEST_UPGRADE__", bestUpgradeValue)
-		page = strings.ReplaceAll(page, "__INITIAL_BEST_INVALIDATE__", bestInvalidateValue)
-		page = strings.ReplaceAll(page, "__INITIAL_BEST_META__", bestMetaValue)
-		page = strings.ReplaceAll(page, "__INITIAL_MARKET_COPY__", html.EscapeString(marketCopyValue))
-		page = strings.ReplaceAll(page, "__INITIAL_MARKET_META__", marketMetaValue)
-		page = strings.ReplaceAll(page, "__INITIAL_TBODY__", initialBodyValue)
-		return page
+	var rows []map[string]any
+	if a.cfg.liveMode {
+		rows = a.getCachedLiveRows(10 * time.Minute)
 	}
-
-	rows := a.getCachedLiveRows(10 * time.Minute)
-	if len(rows) == 0 {
+	if a.cfg.liveMode && len(rows) == 0 {
 		var err error
 		rows, err = a.loadLiveRows(0, 240, 20, false)
 		if err != nil {
 			log.Printf("renderIndexHTML: live bootstrap unavailable: %v", err)
-			page = strings.ReplaceAll(page, "__INITIAL_BEST_HEADLINE__", html.EscapeString(bestHeadlineValue))
-			page = strings.ReplaceAll(page, "__INITIAL_BEST_VERDICT__", html.EscapeString(bestVerdictValue))
-			page = strings.ReplaceAll(page, "__INITIAL_BEST_BLOCKER__", html.EscapeString(bestBlockerValue))
-			page = strings.ReplaceAll(page, "__INITIAL_BEST_EVIDENCE__", bestEvidenceValue)
-			page = strings.ReplaceAll(page, "__INITIAL_BEST_ACTIONABILITY__", bestActionabilityValue)
-			page = strings.ReplaceAll(page, "__INITIAL_BEST_PRIORITY__", bestPriorityValue)
-			page = strings.ReplaceAll(page, "__INITIAL_BEST_FOCUS__", bestFocusValue)
-			page = strings.ReplaceAll(page, "__INITIAL_BEST_RELATIVE__", bestRelativeValue)
-			page = strings.ReplaceAll(page, "__INITIAL_BEST_TRUST__", bestTrustValue)
-			page = strings.ReplaceAll(page, "__INITIAL_BEST_TRUST_REASON__", bestTrustReasonValue)
-			page = strings.ReplaceAll(page, "__INITIAL_BEST_ASYMMETRY_LABEL__", bestAsymmetryLabelValue)
-			page = strings.ReplaceAll(page, "__INITIAL_BEST_ASYMMETRY_REASON__", bestAsymmetryReasonValue)
-			page = strings.ReplaceAll(page, "__INITIAL_BEST_VERDICT_LINE__", bestVerdictLineValue)
-			page = strings.ReplaceAll(page, "__INITIAL_BEST_BLOCKER_LINE__", bestBlockerLineValue)
-			page = strings.ReplaceAll(page, "__INITIAL_BEST_WHY_NOW__", bestWhyNowValue)
-			page = strings.ReplaceAll(page, "__INITIAL_BEST_ANALOGUE__", bestAnalogueValue)
-			page = strings.ReplaceAll(page, "__INITIAL_BEST_OUTCOME__", bestOutcomeValue)
-			page = strings.ReplaceAll(page, "__INITIAL_BEST_TIMING__", bestTimingValue)
-			page = strings.ReplaceAll(page, "__INITIAL_BEST_UPGRADE__", bestUpgradeValue)
-			page = strings.ReplaceAll(page, "__INITIAL_BEST_INVALIDATE__", bestInvalidateValue)
-			page = strings.ReplaceAll(page, "__INITIAL_BEST_META__", bestMetaValue)
-			page = strings.ReplaceAll(page, "__INITIAL_MARKET_COPY__", html.EscapeString(marketCopyValue))
-			page = strings.ReplaceAll(page, "__INITIAL_MARKET_META__", marketMetaValue)
-			page = strings.ReplaceAll(page, "__INITIAL_TBODY__", initialBodyValue)
-			return page
+			rows = nil
+		} else {
+			a.setCachedLiveRows(rows)
 		}
-		a.setCachedLiveRows(rows)
 	}
-	bestHeadlineValue = bestHeadline(rows)
-	bestVerdictValue = bestVerdictText(rows)
-	bestBlockerValue = ""
-	bestEvidenceValue = bestEvidenceText(rows)
-	bestActionabilityValue = bestActionabilityText(rows)
-	bestPriorityValue = bestPriorityText(rows)
-	if best := chooseBestSetupGo(rows); best != nil {
-		bestActionabilityValue = html.EscapeString(stringFieldMap(best, "actionability_label"))
-		bestPriorityValue = html.EscapeString(stringFieldMap(best, "priority_label"))
-		bestVerdictValue = html.EscapeString(stringFieldMap(best, "operator_verdict"))
-		bestBlockerValue = html.EscapeString(firstNonEmpty(
-			stringFieldMap(best, "dominant_blocker"),
-			stringFieldMap(best, "why_not_higher"),
-		))
-		bestTrustValue = html.EscapeString(stringFieldMap(best, "trust_label"))
-		bestTrustReasonValue = html.EscapeString(stringFieldMap(best, "trust_reason"))
-		bestAsymmetryLabelValue = html.EscapeString(stringFieldMap(best, "asymmetry_label"))
-		bestAsymmetryReasonValue = html.EscapeString(stringFieldMap(best, "asymmetry_reason"))
-		bestFocusValue = html.EscapeString(stringFieldMap(best, "operator_focus"))
-		bestRelativeValue = html.EscapeString(stringFieldMap(best, "relative_setup_label"))
-		bestWhyNowValue = html.EscapeString(stringFieldMap(best, "why_now"))
-		bestAnalogueValue = html.EscapeString(stringFieldMap(best, "historical_analogue_summary"))
-		bestOutcomeValue = html.EscapeString(stringFieldMap(best, "historical_outcome_band"))
-		bestTimingValue = html.EscapeString(stringFieldMap(best, "historical_time_to_outcome"))
-		bestUpgradeValue = html.EscapeString(stringFieldMap(best, "upgrade_triggers"))
-		bestInvalidateValue = html.EscapeString(stringFieldMap(best, "invalidate_triggers"))
+
+	page := indexHTML
+	best := chooseBestSetupGo(rows)
+	posture := pagePosture(rows, best)
+	rejects := rejectCount(rows)
+
+	pagePostureText := "NO TRADE"
+	verdictBar := "NO CANDIDATES WORTH MONITORING."
+	heroPrimaryText := "VIEW [GMGN]"
+	heroPrimaryClass := "btn-disabled"
+	heroPrimaryHref := "#"
+	heroSecondaryHref := "#"
+	heroName := "NO LIVE CANDIDATE"
+	heroMeta := "n/a"
+	heroTrigger := "no valid execution edge"
+	heroNoTradeReason := "no valid execution edge"
+	heroState := "AVOID"
+	heroQuality := "DEAD"
+
+	if best != nil {
+		heroName = tokenLabel(best)
+		heroMeta = shortAddress(stringFieldMap(best, "mint"))
+		heroTrigger = firstNonEmpty(stringFieldMap(best, "trigger_line"), "no valid execution edge")
+		heroState = scanStateText(best)
+		heroQuality = qualityTier(best)
+		heroPrimaryHref = firstNonEmpty(stringFieldMap(best, "execution_url"), "#")
+		heroSecondaryHref = heroPrimaryHref
 	}
-	bestVerdictLineValue = bestVerdictLineText(rows)
-	bestBlockerLineValue = bestBlockerLineText(rows)
-	bestMetaValue = bestMetaHTML(rows)
-	marketCopyValue = marketCopy(rows)
-	marketMetaValue = marketMetaHTML(rows)
-	initialBodyValue = renderInitialRows(rows)
-	page = strings.ReplaceAll(page, "__INITIAL_BEST_HEADLINE__", html.EscapeString(bestHeadlineValue))
-	page = strings.ReplaceAll(page, "__INITIAL_BEST_ACTIONABILITY__", bestActionabilityValue)
-	page = strings.ReplaceAll(page, "__INITIAL_BEST_PRIORITY__", bestPriorityValue)
-	page = strings.ReplaceAll(page, "__INITIAL_BEST_VERDICT__", bestVerdictValue)
-	page = strings.ReplaceAll(page, "__INITIAL_BEST_BLOCKER__", bestBlockerValue)
-	page = strings.ReplaceAll(page, "__INITIAL_BEST_TRUST__", bestTrustValue)
-	page = strings.ReplaceAll(page, "__INITIAL_BEST_TRUST_REASON__", bestTrustReasonValue)
-	page = strings.ReplaceAll(page, "__INITIAL_BEST_ASYMMETRY_LABEL__", bestAsymmetryLabelValue)
-	page = strings.ReplaceAll(page, "__INITIAL_BEST_ASYMMETRY_REASON__", bestAsymmetryReasonValue)
-	page = strings.ReplaceAll(page, "__INITIAL_BEST_FOCUS__", bestFocusValue)
-	page = strings.ReplaceAll(page, "__INITIAL_BEST_RELATIVE__", bestRelativeValue)
-	page = strings.ReplaceAll(page, "__INITIAL_BEST_WHY_NOW__", bestWhyNowValue)
-	page = strings.ReplaceAll(page, "__INITIAL_BEST_ANALOGUE__", bestAnalogueValue)
-	page = strings.ReplaceAll(page, "__INITIAL_BEST_OUTCOME__", bestOutcomeValue)
-	page = strings.ReplaceAll(page, "__INITIAL_BEST_TIMING__", bestTimingValue)
-	page = strings.ReplaceAll(page, "__INITIAL_BEST_UPGRADE__", bestUpgradeValue)
-	page = strings.ReplaceAll(page, "__INITIAL_BEST_INVALIDATE__", bestInvalidateValue)
-	page = strings.ReplaceAll(page, "__INITIAL_BEST_EVIDENCE__", bestEvidenceValue)
-	page = strings.ReplaceAll(page, "__INITIAL_BEST_VERDICT_LINE__", bestVerdictLineValue)
-	page = strings.ReplaceAll(page, "__INITIAL_BEST_BLOCKER_LINE__", bestBlockerLineValue)
-	page = strings.ReplaceAll(page, "__INITIAL_BEST_META__", bestMetaValue)
-	page = strings.ReplaceAll(page, "__INITIAL_MARKET_COPY__", html.EscapeString(marketCopyValue))
-	page = strings.ReplaceAll(page, "__INITIAL_MARKET_META__", marketMetaValue)
-	page = strings.ReplaceAll(page, "__INITIAL_TBODY__", initialBodyValue)
+
+	switch posture {
+	case "pristine":
+		pagePostureText = "SYSTEM: NOMINAL"
+		verdictBar = "HIGH CONVICTION SETUP DETECTED. EXECUTION ENABLED."
+		heroPrimaryText = "EXECUTE [GMGN]"
+		heroPrimaryClass = "btn-exec"
+		heroNoTradeReason = ""
+	case "degraded":
+		pagePostureText = "POSTURE: DEFENSIVE"
+		verdictBar = "BAD TAPE DETECTED. NO TRADE ZONE."
+		heroPrimaryText = "VIEW [GMGN]"
+		heroPrimaryClass = "btn-view"
+		if best != nil {
+			heroNoTradeReason = noTradeReason(best)
+		}
+	}
+
+	replacements := map[string]string{
+		"__PAGE_POSTURE_CLASS__":   posture,
+		"__PAGE_POSTURE_TEXT__":    html.EscapeString(pagePostureText),
+		"__PAGE_SYSTEM_META__":     html.EscapeString(fmt.Sprintf("%d rows • %d rejects", len(rows), rejects)),
+		"__PAGE_VERDICT_BAR__":     html.EscapeString(verdictBar),
+		"__HERO_NAME__":            html.EscapeString(heroName),
+		"__HERO_META__":            html.EscapeString(heroMeta),
+		"__HERO_STATE_CLASS__":     stateBadgeClass(heroState),
+		"__HERO_STATE__":           html.EscapeString(heroState),
+		"__HERO_QUALITY_CLASS__":   qualityBadgeClass(heroQuality),
+		"__HERO_QUALITY__":         html.EscapeString(heroQuality),
+		"__HERO_TRIGGER_LINE__":    html.EscapeString(heroTrigger),
+		"__HERO_SUPERIORITY__":     html.EscapeString(superiorityLine(heroQuality)),
+		"__HERO_NO_TRADE_REASON__": html.EscapeString(heroNoTradeReason),
+		"__HERO_PRIMARY_HREF__":    html.EscapeString(heroPrimaryHref),
+		"__HERO_PRIMARY_CLASS__":   heroPrimaryClass,
+		"__HERO_PRIMARY_TEXT__":    html.EscapeString(heroPrimaryText),
+		"__HERO_SECONDARY_HREF__":  html.EscapeString(heroSecondaryHref),
+		"__PRIMARY_SCAN_ROWS__":    renderScanRows(rows, best, posture, false),
+		"__REJECT_SCAN_ROWS__":     renderScanRows(rows, best, posture, true),
+	}
+	for placeholder, value := range replacements {
+		page = strings.ReplaceAll(page, placeholder, value)
+	}
 	return page
 }
 
 func renderInitialRows(rows []map[string]any) string {
-	if len(rows) == 0 {
-		return "<tr><td colspan='25' style='text-align:center;color:#8ea0c3;padding:32px'>No live signals yet — waiting for webhook activity</td></tr>"
+	best := chooseBestSetupGo(rows)
+	return renderScanRows(rows, best, pagePosture(rows, best), false)
+}
+
+func pagePosture(rows []map[string]any, best map[string]any) string {
+	if len(rows) == 0 || best == nil {
+		return "no-trade"
 	}
+	if stringFieldMap(best, "actionability_label") == "actionable now" &&
+		stringFieldMap(best, "trust_label") != "insider-controlled" &&
+		stringFieldMap(best, "clustering_row_status") == "resolved" &&
+		!engineLayer0Reject(best) {
+		return "pristine"
+	}
+	return "degraded"
+}
+
+func rejectCount(rows []map[string]any) int {
+	total := 0
+	for _, row := range rows {
+		if isRejectRow(row) {
+			total++
+		}
+	}
+	return total
+}
+
+func renderScanRows(rows []map[string]any, best map[string]any, posture string, rejects bool) string {
 	var b strings.Builder
 	for _, s := range rows {
+		if isRejectRow(s) != rejects {
+			continue
+		}
 		mint := stringFieldMap(s, "mint")
-		tokenHref := stringFieldMap(s, "execution_url")
-		decision := stringFieldMap(s, "decision")
-		priority := stringFieldMap(s, "priority_label")
-		operatorFocus := stringFieldMap(s, "operator_focus")
-		relativeSetup := stringFieldMap(s, "relative_setup_label")
-		trustLabel := stringFieldMap(s, "trust_label")
-		trustReason := stringFieldMap(s, "trust_reason")
-		asymmetryLabel := stringFieldMap(s, "asymmetry_label")
-		asymmetryReason := stringFieldMap(s, "asymmetry_reason")
-		verdict := stringFieldMap(s, "operator_verdict")
-		whyNow := stringFieldMap(s, "why_now")
-		blocker := firstNonEmpty(stringFieldMap(s, "dominant_blocker"), stringFieldMap(s, "why_not_higher"))
-		actionability := stringFieldMap(s, "actionability_label")
-		analogue := stringFieldMap(s, "historical_analogue_summary")
-		outcome := stringFieldMap(s, "historical_outcome_band")
-		timing := stringFieldMap(s, "historical_time_to_outcome")
-		upgrade := joinListFieldMap(s, "upgrade_triggers")
-		invalidate := joinListFieldMap(s, "invalidate_triggers")
-		state := stringFieldMap(s, "signal_state")
-		if state == "" {
-			state = "expired"
+		state := scanStateText(s)
+		rowClass := scanRowClass(s, best, state, rejects)
+		blocker := blockerText(s, state)
+		actionText := "VIEW [GMGN]"
+		actionClass := "view"
+		if posture == "pristine" && state == "READY" {
+			actionText = "EXECUTE [GMGN]"
+			actionClass = ""
 		}
-		rowClusterStatus := stringFieldMap(s, "clustering_row_status")
-		if rowClusterStatus == "" {
-			rowClusterStatus = "resolved"
-		}
-		clusterCompression := "0% compressed"
-		if pct := int(floatFieldMap(s, "funding_cluster_ratio") * 100); pct > 0 {
-			clusterCompression = fmt.Sprintf("%d%% compressed", pct)
-		}
-		rawBuyers := int(floatFieldMap(s, "buyers_last1m"))
-		effBuyers := int(floatFieldMap(s, "effective_buyers_1m"))
-		decisionClass := "avoid"
-		switch decision {
-		case "BUY":
-			decisionClass = "buy"
-		case "READY":
-			decisionClass = "ready"
-		case "WATCH":
-			decisionClass = "watch"
-		}
-		tier := visualTierGo(verdict, s)
-		rowClass := rowClassForPriorityGo(priority)
-		qualityBadge := "<span class='badge poison'>low conviction</span>"
-		if tier == "clean" {
-			qualityBadge = "<span class='badge cleanflow'>clean</span>"
-		} else if tier == "compromised" {
-			qualityBadge = "<span class='badge partial'>compromised</span>"
-		}
-		clusterLabel := clusteringSurfaceLabelGo(s)
-		clusterBadge := " <span class='badge cleanflow'>resolved</span>"
-		if rowClusterStatus != "resolved" {
-			clusterBadge = " <span class='badge partial'>" + html.EscapeString(strings.ReplaceAll(rowClusterStatus, "_", " ")) + "</span>"
-		}
-		liqMc := "n/a"
-		volMc := "n/a"
-		if eng, ok := s["engine"].(map[string]any); ok {
-			if g1 := findGateGo(eng, 1); g1 != nil {
-				if !boolFieldMap(g1, "skipped") {
-					liqMc = fmt.Sprintf("%.1f%%", floatFieldMap(g1, "value"))
-				} else {
-					liqMc = compactMissingStructureGo(firstNonEmpty(stringFieldMap(s, "market_cap_reason"), stringFieldMap(g1, "reason"), "market cap unavailable"))
-				}
-			}
-			if g4 := findGateGo(eng, 4); g4 != nil {
-				if !boolFieldMap(g4, "skipped") {
-					volMc = fmt.Sprintf("%.1f%%", floatFieldMap(g4, "value"))
-				} else {
-					volMc = compactMissingStructureGo(firstNonEmpty(stringFieldMap(s, "market_cap_reason"), stringFieldMap(g4, "reason"), "market cap unavailable"))
-				}
-			}
-		}
-		shortMint := mint
-		if len(shortMint) > 8 {
-			shortMint = shortMint[:8] + "…"
+		executionURL := firstNonEmpty(stringFieldMap(s, "execution_url"), "#")
+		if executionURL == "#" {
+			actionClass = "muted"
 		}
 		fmt.Fprintf(&b,
-			"<tr class=\"live-row %s\"><td><span class='badge %s'>%s</span></td><td class=\"priority-cell\">%s</td><td class=\"actionability-cell\">%s</td><td class=\"trust-cell\">trust: %s</td><td class=\"trust-reason-cell\">%s</td><td class=\"asymmetry-label-cell\">%s</td><td class=\"asymmetry-reason-cell\">%s</td><td class=\"verdict-label\"><strong>%s</strong></td><td class=\"blocker-cell\">%s</td><td class=\"why-now-cell\">%s</td><td class=\"exec-cell\"><div class='token-cell'><div class='token-meta'><div class='token-actions'><a class='token-link mono' href='%s' target='_blank' rel='noopener noreferrer'>%s</a><a href=\"%s\" class=\"gmgn-link exec-link\" target=\"_blank\" rel=\"noopener noreferrer\">EXECUTE [GMGN]</a></div><span class='token-sub'>%s</span></div></div></td><td><div class='metric-stack'><span>%d raw / %d eff</span><span class='metric-sub'>%s</span></div></td><td><div class='metric-stack'><span>%s%s</span><span class='metric-sub'>%s</span></div></td><td class=\"liqmc-cell\">%s</td><td class=\"volmc-cell\">%s</td><td class=\"focus-cell\">%s</td><td class=\"relative-setup-cell\">%s</td><td class=\"analogue-cell\">analogue: %s</td><td class=\"outcome-cell\">outcome: %s</td><td class=\"timing-cell\">timing: %s</td><td class=\"upgrade-cell\">upgrade if: %s</td><td class=\"invalidate-cell\">invalidate if: %s</td><td>%d</td><td><span class='badge %s'>%s</span></td><td>%.2f/%.2f</td><td>%.2f</td><td>%.2f</td><td>%.2f</td><td>%.1f%%</td><td>%.1fm</td><td>%s</td></tr>",
-			rowClass,
-			decisionClass, html.EscapeString(decision),
-			html.EscapeString(priority),
-			html.EscapeString(actionability),
-			html.EscapeString(trustLabel),
-			html.EscapeString(trustReason),
-			html.EscapeString(asymmetryLabel),
-			html.EscapeString(asymmetryReason),
-			html.EscapeString(verdict),
-			html.EscapeString(blocker),
-			html.EscapeString(whyNow),
-			html.EscapeString(tokenHref), html.EscapeString(shortMint), html.EscapeString(tokenHref), qualityBadge,
-			rawBuyers, effBuyers, html.EscapeString(buyerQualityLabelGo(s)),
-			html.EscapeString(clusterLabel), clusterBadge, html.EscapeString(clusterCompression),
-			html.EscapeString(liqMc), html.EscapeString(volMc),
-			html.EscapeString(operatorFocus),
-			html.EscapeString(relativeSetup),
-			html.EscapeString(analogue), html.EscapeString(outcome), html.EscapeString(timing),
-			html.EscapeString(upgrade), html.EscapeString(invalidate),
+			"<tr class=\"scan-row %s\"><td><span class=\"badge %s\">%s</span></td><td>%d</td><td><div class=\"token-main\">%s</div><div class=\"token-sub\">%s</div></td><td><div class=\"blocker %s\">%s</div></td><td><div class=\"trigger\">%s</div></td><td><a class=\"action-link %s\" href=\"%s\" target=\"_blank\" rel=\"noopener noreferrer\">%s</a></td></tr>",
+			html.EscapeString(rowClass),
+			stateBadgeClass(state), html.EscapeString(state),
 			int(floatFieldMap(s, "confidence_score")+0.5),
-			stateClassGo(state), html.EscapeString(state),
-			floatFieldMap(s, "buy_sol_last_1m"), floatFieldMap(s, "sell_sol_last_1m"),
-			floatFieldMap(s, "buyer_acceleration"), floatFieldMap(s, "execution_penalty"), floatFieldMap(s, "adversarial_score"),
-			floatFieldMap(s, "estimated_impact_pct"),
-			floatFieldMap(s, "age_seconds")/60.0,
-			html.EscapeString(gatesCellGo(s)),
+			html.EscapeString(tokenLabel(s)),
+			html.EscapeString(tokenSubLabel(mint)),
+			blockerClass(s, state, blocker), html.EscapeString(blocker),
+			html.EscapeString(firstNonEmpty(stringFieldMap(s, "trigger_line"), "no valid execution edge")),
+			actionClass, html.EscapeString(executionURL), html.EscapeString(actionText),
 		)
 	}
 	return b.String()
+}
+
+func isRejectRow(row map[string]any) bool {
+	return stringFieldMap(row, "priority_label") == "deprioritize"
+}
+
+func engineLayer0Reject(row map[string]any) bool {
+	eng, ok := row["engine"].(map[string]any)
+	if !ok {
+		return false
+	}
+	return boolFieldMap(eng, "layer0_reject")
+}
+
+func tokenLabel(row map[string]any) string {
+	mint := stringFieldMap(row, "mint")
+	label := firstNonEmpty(
+		stringFieldMap(row, "token_symbol"),
+		stringFieldMap(row, "symbol"),
+		stringFieldMap(row, "token_name"),
+		stringFieldMap(row, "name"),
+	)
+	if label == "" || label == mint {
+		return shortAddress(mint)
+	}
+	return label
+}
+
+func tokenSubLabel(mint string) string {
+	if strings.TrimSpace(mint) == "" {
+		return "CA n/a"
+	}
+	return "CA " + shortAddress(mint)
+}
+
+func shortAddress(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= 12 {
+		return value
+	}
+	return value[:6] + "..." + value[len(value)-4:]
+}
+
+func scanStateText(row map[string]any) string {
+	actionability := strings.ToLower(strings.TrimSpace(stringFieldMap(row, "actionability_label")))
+	decision := stringFieldMap(row, "decision")
+	if actionability == "actionable now" || decision == "BUY" || decision == "READY" {
+		return "READY"
+	}
+	if strings.Contains(actionability, "observe") ||
+		strings.Contains(actionability, "monitor") ||
+		decision == "WATCH" ||
+		stringFieldMap(row, "priority_label") == "monitor_for_upgrade" {
+		return "WATCH"
+	}
+	return "AVOID"
+}
+
+func stateBadgeClass(state string) string {
+	switch state {
+	case "READY":
+		return "ready"
+	case "WATCH":
+		return "watch"
+	default:
+		return "avoid"
+	}
+}
+
+func qualityTier(row map[string]any) string {
+	return firstNonEmpty(stringFieldMap(row, "quality_tier"), "DEAD")
+}
+
+func qualityBadgeClass(tier string) string {
+	switch tier {
+	case "APEX":
+		return "apex"
+	case "NEAR":
+		return "near"
+	case "TRAP":
+		return "trap"
+	default:
+		return "dead"
+	}
+}
+
+func scanRowClass(row map[string]any, best map[string]any, state string, reject bool) string {
+	if reject {
+		return "reject"
+	}
+	if best != nil && stringFieldMap(row, "mint") == stringFieldMap(best, "mint") {
+		return "best"
+	}
+	if state == "WATCH" || stringFieldMap(row, "priority_label") == "monitor_for_upgrade" {
+		return "watch"
+	}
+	return ""
+}
+
+func blockerText(row map[string]any, state string) string {
+	if state == "READY" &&
+		stringFieldMap(row, "trust_label") != "insider-controlled" &&
+		stringFieldMap(row, "clustering_row_status") == "resolved" &&
+		!engineLayer0Reject(row) {
+		return "none"
+	}
+	return noTradeReason(row)
+}
+
+func noTradeReason(row map[string]any) string {
+	return firstNonEmpty(
+		stringFieldMap(row, "no_trade_reason"),
+		stringFieldMap(row, "dominant_blocker"),
+		stringFieldMap(row, "why_not_higher"),
+		"no valid execution edge",
+	)
+}
+
+func blockerClass(row map[string]any, state string, blocker string) string {
+	if strings.TrimSpace(blocker) == "" || blocker == "none" {
+		return ""
+	}
+	text := strings.ToLower(blocker + " " + stringFieldMap(row, "trust_label"))
+	if strings.Contains(text, "liquidity") ||
+		strings.Contains(text, "impact") ||
+		strings.Contains(text, "fallback") ||
+		strings.Contains(text, "concentration") ||
+		strings.Contains(text, "insider") ||
+		strings.Contains(text, "execution") ||
+		strings.Contains(text, "reject") ||
+		strings.Contains(text, "compromised") {
+		return "red"
+	}
+	if state == "WATCH" {
+		return "amber"
+	}
+	return ""
+}
+
+func superiorityLine(tier string) string {
+	switch tier {
+	case "APEX":
+		return "Apex candidate: real demand meeting executable structure."
+	case "NEAR":
+		return "Best available but still short of valid execution."
+	case "TRAP":
+		return "Likely distribution trap. Do not chase."
+	default:
+		return "No material edge versus the rest of the tape."
+	}
 }
 
 func bestHeadline(rows []map[string]any) string {
@@ -1230,6 +1267,458 @@ func firstNonEmpty(values ...string) string {
 }
 
 const indexHTML = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Structural Quality Filter</title>
+<style>
+:root{
+  --bg:#050505;
+  --panel:#0a0a0a;
+  --panel-2:#0d0d0d;
+  --border:#1a1a1a;
+  --text:#ececec;
+  --muted:#727272;
+  --green:#00ff66;
+  --green-bg:#07170d;
+  --amber:#ffcc00;
+  --amber-bg:#1a1500;
+  --red:#ff4d4d;
+  --red-bg:#1a0707;
+  --blue:#66b3ff;
+  --blue-bg:#08121c;
+  --mono:"JetBrains Mono","SFMono-Regular","Menlo","Consolas",monospace;
+}
+html,body{
+  background:var(--bg);
+  color:var(--text);
+  margin:0;
+  padding:0;
+  font-family:var(--mono);
+  font-size:11px;
+}
+.operator-shell{
+  width:100%;
+  min-height:100vh;
+  background:var(--bg);
+}
+.topbar{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:10px 16px;
+  border-bottom:1px solid var(--border);
+  background:#070707;
+}
+.topbar-left{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+}
+.eyebrow{
+  color:var(--muted);
+  font-size:10px;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+}
+.health-pill{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:3px 8px;
+  font-size:9px;
+  font-weight:800;
+  border-radius:3px;
+  border:1px solid var(--border);
+  text-transform:uppercase;
+}
+.health-pill.pristine{
+  background:var(--green-bg);
+  color:var(--green);
+  border-color:rgba(0,255,102,.35);
+}
+.health-pill.degraded{
+  background:var(--amber-bg);
+  color:var(--amber);
+  border-color:rgba(255,204,0,.35);
+}
+.health-pill.no-trade{
+  background:var(--red-bg);
+  color:var(--red);
+  border-color:rgba(255,77,77,.35);
+}
+.topbar-meta{
+  color:var(--muted);
+  font-size:10px;
+}
+.verdict-bar{
+  padding:12px 16px;
+  font-size:14px;
+  font-weight:900;
+  letter-spacing:-.02em;
+  border-bottom:1px solid var(--border);
+}
+.verdict-bar.pristine{
+  background:#07170d;
+  color:var(--green);
+  border-bottom:2px solid var(--green);
+}
+.verdict-bar.degraded{
+  background:#1a1500;
+  color:var(--amber);
+  border-bottom:2px solid var(--amber);
+}
+.verdict-bar.no-trade{
+  background:#1a0707;
+  color:var(--red);
+  border-bottom:2px solid var(--red);
+}
+.hero{
+  display:grid;
+  grid-template-columns:240px 1fr 220px;
+  gap:24px;
+  align-items:center;
+  padding:18px 16px;
+  border-bottom:1px solid var(--border);
+  background:linear-gradient(180deg,#0a0a0a,#080808);
+}
+.hero.degraded{
+  background:linear-gradient(180deg,#141000,#0b0900);
+}
+.hero.no-trade{
+  background:linear-gradient(180deg,#120707,#090505);
+}
+.hero-left{
+  min-width:0;
+}
+.hero-name{
+  margin:0;
+  font-size:24px;
+  line-height:1;
+  font-weight:900;
+  color:#fff;
+}
+.hero-meta{
+  margin-top:6px;
+  color:var(--muted);
+  font-size:10px;
+}
+.badge-row{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:10px;
+}
+.badge{
+  display:inline-flex;
+  align-items:center;
+  padding:3px 7px;
+  border-radius:3px;
+  font-size:9px;
+  font-weight:800;
+  border:1px solid var(--border);
+  text-transform:uppercase;
+}
+.badge.ready{
+  color:var(--green);
+  background:var(--green-bg);
+  border-color:rgba(0,255,102,.35);
+}
+.badge.watch{
+  color:var(--amber);
+  background:var(--amber-bg);
+  border-color:rgba(255,204,0,.35);
+}
+.badge.avoid{
+  color:var(--red);
+  background:var(--red-bg);
+  border-color:rgba(255,77,77,.35);
+}
+.badge.apex{
+  color:var(--green);
+  background:var(--green-bg);
+}
+.badge.near{
+  color:var(--amber);
+  background:var(--amber-bg);
+}
+.badge.trap{
+  color:var(--red);
+  background:var(--red-bg);
+}
+.badge.dead{
+  color:#a0a0a0;
+  background:#111;
+}
+.hero-middle{
+  min-width:0;
+  border-left:2px solid var(--green);
+  padding-left:16px;
+}
+.hero.degraded .hero-middle{
+  border-left-color:var(--amber);
+}
+.hero.no-trade .hero-middle{
+  border-left-color:var(--red);
+}
+.hero-trigger{
+  font-size:14px;
+  font-weight:700;
+  color:#fff;
+  line-height:1.35;
+}
+.hero-sub{
+  margin-top:7px;
+  font-size:10px;
+  color:var(--muted);
+}
+.hero-superiority{
+  margin-top:7px;
+  font-size:10px;
+  color:var(--green);
+  font-style:italic;
+}
+.hero.degraded .hero-superiority{
+  color:var(--amber);
+}
+.hero.no-trade .hero-superiority{
+  color:var(--red);
+}
+.hero-reason{
+  margin-top:8px;
+  font-size:10px;
+  color:var(--red);
+  font-weight:700;
+}
+.hero-right{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.btn{
+  display:block;
+  width:100%;
+  box-sizing:border-box;
+  text-align:center;
+  padding:12px 10px;
+  border-radius:3px;
+  text-decoration:none;
+  font-weight:900;
+  font-size:12px;
+  border:1px solid transparent;
+  cursor:pointer;
+}
+.btn-exec{
+  background:var(--green);
+  color:#000;
+}
+.btn-view{
+  background:var(--amber);
+  color:#000;
+}
+.btn-disabled{
+  background:#111;
+  color:#555;
+  border-color:var(--border);
+  pointer-events:none;
+}
+.btn-sec{
+  background:transparent;
+  color:var(--muted);
+  border-color:var(--border);
+  font-size:10px;
+  padding:7px 8px;
+}
+.table-wrap{
+  padding:0 0 16px 0;
+}
+.scan-table{
+  width:100%;
+  border-collapse:collapse;
+}
+.scan-table thead th{
+  text-align:left;
+  padding:10px 12px;
+  color:var(--muted);
+  font-size:9px;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  border-bottom:1px solid var(--border);
+  background:#070707;
+  position:sticky;
+  top:0;
+}
+.scan-table tbody td{
+  padding:12px;
+  border-bottom:1px solid var(--border);
+  vertical-align:middle;
+}
+.scan-row:hover{
+  background:#0b0b0b;
+}
+.scan-row.best{
+  background:rgba(0,255,102,.04);
+  box-shadow:inset 3px 0 0 var(--green);
+}
+.scan-row.watch{
+  background:rgba(255,204,0,.04);
+  box-shadow:inset 3px 0 0 var(--amber);
+}
+.scan-row.reject{
+  opacity:.72;
+}
+.token-main{
+  font-size:12px;
+  font-weight:800;
+  color:#fff;
+}
+.token-sub{
+  margin-top:4px;
+  font-size:10px;
+  color:var(--muted);
+}
+.blocker{
+  font-size:11px;
+  font-weight:800;
+  color:#fff;
+}
+.blocker.red{
+  color:var(--red);
+}
+.blocker.amber{
+  color:var(--amber);
+}
+.trigger{
+  font-size:11px;
+  color:#d7d7d7;
+  white-space:nowrap;
+}
+.action-link{
+  color:var(--green);
+  text-decoration:none;
+  font-weight:800;
+  font-size:11px;
+}
+.action-link.view{
+  color:var(--amber);
+}
+.action-link.muted{
+  color:var(--muted);
+}
+.secondary-panel{
+  margin-top:8px;
+  border-top:1px solid var(--border);
+}
+.secondary-panel details{
+  border-top:1px solid var(--border);
+}
+.secondary-panel summary{
+  list-style:none;
+  cursor:pointer;
+  padding:12px 16px;
+  color:var(--muted);
+  font-size:10px;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  background:#070707;
+}
+.secondary-panel summary::-webkit-details-marker{
+  display:none;
+}
+@media (max-width: 980px){
+  .hero{
+    grid-template-columns:1fr;
+  }
+  .hero-right{
+    width:100%;
+  }
+  .trigger{
+    white-space:normal;
+  }
+}
+</style>
+</head>
+<body>
+<div class="operator-shell">
+  <div class="topbar">
+    <div class="topbar-left">
+      <div class="eyebrow">Structural Quality Filter</div>
+      <div id="pagePostureHeader" class="health-pill __PAGE_POSTURE_CLASS__">__PAGE_POSTURE_TEXT__</div>
+      <div class="topbar-meta" id="pageSystemMeta">__PAGE_SYSTEM_META__</div>
+    </div>
+  </div>
+
+  <div id="pageVerdictBar" class="verdict-bar __PAGE_POSTURE_CLASS__">__PAGE_VERDICT_BAR__</div>
+
+  <section id="heroCard" class="hero __PAGE_POSTURE_CLASS__">
+    <div class="hero-left">
+      <h1 id="heroName" class="hero-name">__HERO_NAME__</h1>
+      <div id="heroMeta" class="hero-meta">CA: __HERO_META__</div>
+      <div class="badge-row">
+        <div id="heroStateBadge" class="badge __HERO_STATE_CLASS__">__HERO_STATE__</div>
+        <div id="heroQualityBadge" class="badge __HERO_QUALITY_CLASS__">__HERO_QUALITY__</div>
+      </div>
+    </div>
+
+    <div class="hero-middle">
+      <div id="heroTriggerLine" class="hero-trigger">__HERO_TRIGGER_LINE__</div>
+      <div id="heroSub" class="hero-sub">trigger = flow • cluster/trust • execution</div>
+      <div id="heroSuperiority" class="hero-superiority">__HERO_SUPERIORITY__</div>
+      <div id="heroNoTradeReason" class="hero-reason">__HERO_NO_TRADE_REASON__</div>
+    </div>
+
+    <div class="hero-right">
+      <a id="heroPrimaryAction" href="__HERO_PRIMARY_HREF__" class="btn __HERO_PRIMARY_CLASS__" target="_blank" rel="noopener noreferrer">__HERO_PRIMARY_TEXT__</a>
+      <a id="heroSecondaryAction" href="__HERO_SECONDARY_HREF__" class="btn btn-sec" target="_blank" rel="noopener noreferrer">DEXSCREENER ↗</a>
+    </div>
+  </section>
+
+  <div class="table-wrap">
+    <table class="scan-table">
+      <thead>
+        <tr>
+          <th>state</th>
+          <th>conf</th>
+          <th>token</th>
+          <th>blocker</th>
+          <th>trigger</th>
+          <th>action</th>
+        </tr>
+      </thead>
+      <tbody id="primaryScanBody">
+        __PRIMARY_SCAN_ROWS__
+      </tbody>
+    </table>
+
+    <div class="secondary-panel">
+      <details id="rejectsPanel">
+        <summary>Show rejects</summary>
+        <table class="scan-table">
+          <thead>
+            <tr>
+              <th>state</th>
+              <th>conf</th>
+              <th>token</th>
+              <th>blocker</th>
+              <th>trigger</th>
+              <th>action</th>
+            </tr>
+          </thead>
+          <tbody id="rejectScanBody">
+            __REJECT_SCAN_ROWS__
+          </tbody>
+        </table>
+      </details>
+    </div>
+  </div>
+</div>
+</body>
+</html>`
+
+const legacyIndexHTML = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
