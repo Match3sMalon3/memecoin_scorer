@@ -421,7 +421,148 @@ func deriveSnapshot(st *tokenState, now time.Time) model.TokenSnapshot {
 		LastPriceReason: lastPriceReason,
 		MarketCapSOL:    marketCap,
 		MarketCapReason: marketCapReason,
+		ShadowFeatures:  shadowFeatureInputs(st, now),
 	}
+}
+
+func shadowFeatureInputs(st *tokenState, now time.Time) model.ShadowFeatureInputs {
+	if now.Before(st.FirstSeenAt.Add(35 * time.Minute)) {
+		return model.ShadowFeatureInputs{}
+	}
+	if len(st.buyHistory) >= MaxBuyHistoryPerToken || len(st.sellHistory) >= MaxSellHistoryPerToken {
+		return model.ShadowFeatureInputs{}
+	}
+
+	start := st.FirstSeenAt
+	min5 := start.Add(5 * time.Minute)
+	min35 := start.Add(35 * time.Minute)
+
+	obs := model.ShadowFeatureInputs{
+		BuySol0_35m:                buySolBetween(st.buyHistory, start, min35),
+		HasBuySol0_35m:             true,
+		SellSol0_35m:               sellSolBetween(st.sellHistory, start, min35),
+		HasSellSol0_35m:            true,
+		SellTradeCount5to35m:       sellTradeCountBetween(st.sellHistory, min5, min35),
+		HasSellTradeCount5to35m:    true,
+		SellUniqueTraders5to35m:    sellUniqueTradersBetween(st.sellHistory, min5, min35),
+		HasSellUniqueTraders5to35m: true,
+		WalletsThatExited:          walletsThatExitedBy(st.sellHistory, min35),
+		HasWalletsThatExited:       true,
+		WalletsGt25Pct:             walletsOverReturnPctBy(st.buyHistory, st.sellHistory, min35, 25),
+		HasWalletsGt25Pct:          true,
+		MedianRealizedReturnPct:    medianRealizedReturnPctBy(st.buyHistory, st.sellHistory, min35),
+		HasMedianRealizedReturnPct: true,
+	}
+	if obs.WalletsThatExited > 0 {
+		obs.WinnerExitRatio = float64(obs.WalletsGt25Pct) / float64(obs.WalletsThatExited)
+		obs.HasWinnerExitRatio = true
+	}
+	return obs
+}
+
+func buySolBetween(history []timestampedBuy, start, end time.Time) float64 {
+	total := 0.0
+	for i := range history {
+		if inWindowInclusive(history[i].At, start, end) {
+			total += history[i].SOL
+		}
+	}
+	return total
+}
+
+func sellSolBetween(history []timestampedSell, start, end time.Time) float64 {
+	total := 0.0
+	for i := range history {
+		if inWindowInclusive(history[i].At, start, end) {
+			total += history[i].SOL
+		}
+	}
+	return total
+}
+
+func sellTradeCountBetween(history []timestampedSell, start, end time.Time) int {
+	count := 0
+	for i := range history {
+		if inWindowInclusive(history[i].At, start, end) {
+			count++
+		}
+	}
+	return count
+}
+
+func sellUniqueTradersBetween(history []timestampedSell, start, end time.Time) int {
+	seen := make(map[string]struct{})
+	for i := range history {
+		if inWindowInclusive(history[i].At, start, end) {
+			seen[history[i].Wallet] = struct{}{}
+		}
+	}
+	return len(seen)
+}
+
+func walletsThatExitedBy(history []timestampedSell, end time.Time) int {
+	seen := make(map[string]struct{})
+	for i := range history {
+		if !history[i].At.After(end) {
+			seen[history[i].Wallet] = struct{}{}
+		}
+	}
+	return len(seen)
+}
+
+func walletsOverReturnPctBy(buys []timestampedBuy, sells []timestampedSell, end time.Time, threshold float64) int {
+	returns := walletReturnPctBy(buys, sells, end)
+	count := 0
+	for _, pct := range returns {
+		if pct >= threshold {
+			count++
+		}
+	}
+	return count
+}
+
+func medianRealizedReturnPctBy(buys []timestampedBuy, sells []timestampedSell, end time.Time) float64 {
+	returns := make([]float64, 0, len(sells))
+	for _, pct := range walletReturnPctBy(buys, sells, end) {
+		returns = append(returns, pct)
+	}
+	if len(returns) == 0 {
+		return 0
+	}
+	sort.Float64s(returns)
+	n := len(returns)
+	if n%2 == 0 {
+		return (returns[n/2-1] + returns[n/2]) / 2
+	}
+	return returns[n/2]
+}
+
+func walletReturnPctBy(buys []timestampedBuy, sells []timestampedSell, end time.Time) map[string]float64 {
+	buySOL := make(map[string]float64)
+	sellSOL := make(map[string]float64)
+	for i := range buys {
+		if !buys[i].At.After(end) {
+			buySOL[buys[i].Wallet] += buys[i].SOL
+		}
+	}
+	for i := range sells {
+		if !sells[i].At.After(end) {
+			sellSOL[sells[i].Wallet] += sells[i].SOL
+		}
+	}
+	returns := make(map[string]float64)
+	for wallet, sold := range sellSOL {
+		bought := buySOL[wallet]
+		if bought <= 0 {
+			continue
+		}
+		returns[wallet] = ((sold - bought) / bought) * 100
+	}
+	return returns
+}
+
+func inWindowInclusive(at, start, end time.Time) bool {
+	return !at.Before(start) && !at.After(end)
 }
 
 // derivedMarketCap estimates market cap as lastPriceSOL × observable token supply.

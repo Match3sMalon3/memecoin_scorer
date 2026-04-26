@@ -12,11 +12,14 @@ import (
 	"strings"
 	"time"
 
+	"memecoin_scorer/internal/calibration"
 	"memecoin_scorer/internal/cluster"
 	"memecoin_scorer/internal/db"
 	"memecoin_scorer/internal/ingestor"
 	"memecoin_scorer/internal/live"
 	"memecoin_scorer/internal/model"
+	"memecoin_scorer/internal/proxy"
+	"memecoin_scorer/internal/shadow"
 	"memecoin_scorer/internal/state"
 )
 
@@ -216,6 +219,7 @@ func main() {
 	secret := os.Getenv("HELIUS_WEBHOOK_SECRET")
 	liveCfg := liveConfigFromEnv()
 	store := state.New()
+	calibrationRecorder := calibration.NewRecorder()
 
 	// Optional DB persistence — gracefully disabled when DATABASE_URL is unset.
 	dbStore, dbErr := db.Open()
@@ -253,7 +257,7 @@ func main() {
 		}
 	}()
 
-	srv := newServer(store, dbStore, secret, liveCfg, ingressHealth, poller)
+	srv := newServerWithCalibration(store, dbStore, calibrationRecorder, secret, liveCfg, ingressHealth, poller)
 
 	addr := ":" + resolveIngestorPort()
 	log.Printf("ingestor listening on http://localhost%s", addr)
@@ -268,10 +272,23 @@ func newServer(
 	ingressHealth *ingestor.IngressHealth,
 	poller *ingestor.Poller,
 ) http.Handler {
+	return newServerWithCalibration(store, dbStore, calibration.NewRecorder(), secret, liveCfg, ingressHealth, poller)
+}
+
+func newServerWithCalibration(
+	store *state.Store,
+	dbStore *db.Store,
+	calibrationRecorder *calibration.Recorder,
+	secret string,
+	liveCfg live.LiveConfig,
+	ingressHealth *ingestor.IngressHealth,
+	poller *ingestor.Poller,
+) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", makeHealthzHandler(liveCfg, ingressHealth, poller))
 	mux.HandleFunc("/webhook", makeWebhookHandler(store, dbStore, secret))
-	mux.HandleFunc("/api/snapshots", makeSnapshotsHandler(store, dbStore, liveCfg))
+	mux.HandleFunc("/api/snapshots", makeSnapshotsHandler(store, dbStore, calibrationRecorder, liveCfg))
+	mux.HandleFunc("/api/calibration-samples", makeCalibrationSamplesHandler(calibrationRecorder))
 
 	if os.Getenv("ENABLE_LOCAL_ADMIN") == "1" {
 		mux.HandleFunc("/admin/reset-state", makeResetHandler(store))
@@ -368,7 +385,7 @@ func makeWebhookHandler(store *state.Store, dbStore *db.Store, secret string) ht
 	}
 }
 
-func makeSnapshotsHandler(store *state.Store, dbStore *db.Store, liveCfg live.LiveConfig) http.HandlerFunc {
+func makeSnapshotsHandler(store *state.Store, dbStore *db.Store, calibrationRecorder *calibration.Recorder, liveCfg live.LiveConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -436,6 +453,7 @@ func makeSnapshotsHandler(store *state.Store, dbStore *db.Store, liveCfg live.Li
 				LastPriceSol:              s.LastPriceSOL,
 				MarketCapSol:              s.MarketCapSOL,
 				Layer0Reject:              d.Engine.Layer0Reject,
+				Shadow:                    shadow.EvaluateShadowScore(&s, now),
 				Engine:                    d.Engine,
 			}
 			scored.ExecutionURL = live.BuildExecutionURL(scored.Mint)
@@ -449,6 +467,7 @@ func makeSnapshotsHandler(store *state.Store, dbStore *db.Store, liveCfg live.Li
 			scored.HistoricalTimeToOutcome = live.BuildHistoricalTimeToOutcome(&scored)
 			scored.UpgradeTriggers = live.BuildUpgradeTriggers(&scored)
 			scored.InvalidateTriggers = live.BuildInvalidateTriggers(&scored)
+			scored.EarlyProxy = proxy.ScoreEarlyProxy(scored)
 			// Persist actionable BUY/READY signals to DB and emit console line.
 			if scored.IsActionable && (scored.Decision == "BUY" || scored.Decision == "READY") {
 				go dbStore.InsertSignal(context.WithoutCancel(r.Context()), scored)
@@ -469,12 +488,34 @@ func makeSnapshotsHandler(store *state.Store, dbStore *db.Store, liveCfg live.Li
 			}
 		}
 		live.AssignPriorityLabels(out)
+		calibrationRecorder.ObserveRows(out, now)
 		log.Printf("snapshots api: snapshot_count=%d row_count=%d priced_rows=%d market_cap_rows=%d min_buyers=%d since_minutes=%d actionable_only=%t",
 			len(snapshots), len(out), pricedRows, marketCapRows, minBuyers, sinceMinutes, actionableOnly)
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(out); err != nil {
 			log.Printf("snapshots encode: %v", err)
+		}
+	}
+}
+
+func makeCalibrationSamplesHandler(calibrationRecorder *calibration.Recorder) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		limit := queryInt(r.URL.Query().Get("limit"), 100)
+		if limit > maxSnapshotLimit {
+			limit = maxSnapshotLimit
+		}
+		samples := []calibration.Record{}
+		if calibrationRecorder != nil {
+			samples = calibrationRecorder.Samples(limit)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(samples); err != nil {
+			log.Printf("calibration samples encode: %v", err)
 		}
 	}
 }

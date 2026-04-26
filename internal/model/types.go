@@ -44,6 +44,82 @@ type EngineDecision struct {
 	ScoreCap int `json:"score_cap"`
 }
 
+type ShadowFeatureCoverage struct {
+	FeatureWindowComplete bool     `json:"feature_window_complete"`
+	MissingFields         []string `json:"missing_fields,omitempty"`
+}
+
+type ShadowScoreResult struct {
+	EligibleForShadowScore bool     `json:"eligible_for_shadow_score"`
+	FeatureWindowComplete  bool     `json:"feature_window_complete"`
+	MissingFields          []string `json:"missing_fields,omitempty"`
+
+	ValidatedTradeable30m *bool    `json:"validated_tradeable_30m,omitempty"`
+	ValidatedClean30m     *bool    `json:"validated_clean_30m,omitempty"`
+	OpportunityScore      *float64 `json:"opportunity_score,omitempty"`
+
+	ComparedAt int64    `json:"compared_at,omitempty"`
+	Notes      []string `json:"notes,omitempty"`
+}
+
+type EarlyProxyScore struct {
+	Eligible        bool     `json:"eligible"`
+	Score           float64  `json:"score"`
+	Threshold       float64  `json:"threshold"`
+	Band            string   `json:"band"`
+	Reasons         []string `json:"reasons,omitempty"`
+	RiskFlags       []string `json:"risk_flags,omitempty"`
+	MissingFields   []string `json:"missing_fields,omitempty"`
+	EvidenceVersion string   `json:"evidence_version"`
+}
+
+// ShadowFeatureInputs carries mature live observations that can be mapped into
+// the Dune-validated TokenFeatures contract. Each Has* flag is required because
+// zero is a valid value for several validated fields.
+type ShadowFeatureInputs struct {
+	CohortBuyerCount    int
+	HasCohortBuyerCount bool
+
+	MfeMultiple30m    float64
+	HasMfeMultiple30m bool
+
+	BuySol0_35m    float64
+	HasBuySol0_35m bool
+
+	SellSol0_35m    float64
+	HasSellSol0_35m bool
+
+	SellTradeCount5to35m    int
+	HasSellTradeCount5to35m bool
+
+	SellUniqueTraders5to35m    int
+	HasSellUniqueTraders5to35m bool
+
+	ManipulationRiskScore    int
+	HasManipulationRiskScore bool
+
+	FirstMinuteShare    float64
+	HasFirstMinuteShare bool
+
+	SniperIntensityRatio    float64
+	HasSniperIntensityRatio bool
+
+	SizeDiversityRatio    float64
+	HasSizeDiversityRatio bool
+
+	WalletsThatExited    int
+	HasWalletsThatExited bool
+
+	MedianRealizedReturnPct    float64
+	HasMedianRealizedReturnPct bool
+
+	WalletsGt25Pct    int
+	HasWalletsGt25Pct bool
+
+	WinnerExitRatio    float64
+	HasWinnerExitRatio bool
+}
+
 // TokenSnapshot is a read-only derived view of a token's live state.
 // All fields are computed at snapshot time from the store's internal state.
 // No mutable references are held; it is safe to pass by value.
@@ -147,6 +223,10 @@ type TokenSnapshot struct {
 	// MarketCapReason explains why MarketCapSOL is zero.
 	// Empty when a non-zero market cap has been derived.
 	MarketCapReason string `json:"market_cap_reason,omitempty"`
+
+	// ShadowFeatures is intentionally not serialized. It carries observed,
+	// availability-marked live features for the shadow validated scorer bridge.
+	ShadowFeatures ShadowFeatureInputs `json:"-"`
 }
 
 // LiveSnapshot extends TokenSnapshot with a live decision classification.
@@ -204,15 +284,16 @@ type LiveSnapshot struct {
 	// raw wallet roots because clustering resolution failed or timed out.
 	ClusteringFallbacks int `json:"clustering_fallbacks"`
 
-	// --- Module 6C: Freshness / stale signal control ---
+	// --- Module 6C: Candidate lifecycle / freshness ---
 
-	// SignalState is one of: "fresh" | "stale" | "expired".
-	// fresh   — within the actionable age window for this label
-	// stale   — WATCH signal past BUY/READY window but inside WATCH window
-	// expired — beyond the label's age limit, or AVOID
+	// SignalState is one of: "forming" | "active" | "cooling" | "expired".
+	// forming — token is younger than the earliest 5m proxy window and not terminally rejected
+	// active  — token is older than 5m and had recent activity inside the active freshness window
+	// cooling — token is older than 5m and quiet, but still inside the monitoring window
+	// expired — beyond the monitoring window, or terminal hard-rug/self-bundling rejection
 	SignalState string `json:"signal_state"`
-	// IsActionable is true when the signal is fresh enough to act on.
-	// Dashboard default view shows only rows where is_actionable=true.
+	// IsActionable is true when the row is trade-actionable now. Lifecycle monitoring
+	// can continue while this remains false.
 	IsActionable bool `json:"is_actionable"`
 
 	// --- Module 6D: Warm-up / confidence ---
@@ -239,12 +320,18 @@ type LiveSnapshot struct {
 	ExecutionURL string `json:"execution_url"`
 	// DexscreenerURL is a direct DexScreener click-through when a real URL is known.
 	DexscreenerURL string `json:"dexscreener_url"`
+	SolscanURL     string `json:"solscan_url,omitempty"`
 	// QualityTier is the compact posture tier used by the operator hero/table.
 	QualityTier string `json:"quality_tier"`
 	// TriggerLine is the compact scan trigger line used by the operator hero/table.
 	TriggerLine string `json:"trigger_line"`
 	// NoTradeReason is the compact blocker line used when execution is not pristine.
 	NoTradeReason string `json:"no_trade_reason"`
+	// Shadow is the evidence-bearing offline-scorer reconciliation result.
+	Shadow ShadowScoreResult `json:"shadow"`
+	// EarlyProxy is a decision-time runner-formation proxy inspired by the
+	// historically validated Dune scorer. It uses only currently observable live fields.
+	EarlyProxy EarlyProxyScore `json:"early_proxy"`
 
 	PriorityLabel             string `json:"priority_label"`
 	ActionabilityLabel        string `json:"actionability_label"`

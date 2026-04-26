@@ -26,10 +26,11 @@ const (
 	clusterWindowTimeout = 750 * time.Millisecond
 )
 
-// Signal state labels (freshness).
+// Signal state labels (candidate lifecycle).
 const (
-	StateFresh   = "fresh"
-	StateStale   = "stale"
+	StateForming = "forming"
+	StateActive  = "active"
+	StateCooling = "cooling"
 	StateExpired = "expired"
 )
 
@@ -408,40 +409,40 @@ func finalize(d Decision, snap model.TokenSnapshot, cfg LiveConfig, now time.Tim
 	return d
 }
 
-// --- Module 6C: freshness ---
+// --- Module 6C: lifecycle / freshness ---
 
 func applyFreshness(d Decision, snap model.TokenSnapshot, cfg LiveConfig, now time.Time) Decision {
 	signalAgeMin := now.Sub(snap.LastEventAt).Minutes()
 	if signalAgeMin < 0 {
 		signalAgeMin = 0
 	}
+	tokenAgeMin := snap.AgeSeconds / 60
 
-	switch d.Label {
-	case LabelBUY, LabelREADY:
-		if signalAgeMin <= cfg.MaxSignalAgeMinBuyReady {
-			d.SignalState = StateFresh
-			d.IsActionable = true
-		} else {
-			d.SignalState = StateExpired
-			d.IsActionable = false
-		}
-	case LabelWATCH:
-		if signalAgeMin <= cfg.MaxSignalAgeMinWatch {
-			if signalAgeMin <= cfg.MaxSignalAgeMinBuyReady {
-				d.SignalState = StateFresh
-			} else {
-				d.SignalState = StateStale
-			}
-			d.IsActionable = true
-		} else {
-			d.SignalState = StateExpired
-			d.IsActionable = false
-		}
-	default: // AVOID
+	switch {
+	case terminalLifecycleReject(d):
 		d.SignalState = StateExpired
-		d.IsActionable = false
+	case tokenAgeMin < 5:
+		d.SignalState = StateForming
+	case signalAgeMin <= cfg.MaxSignalAgeMinBuyReady:
+		d.SignalState = StateActive
+	case signalAgeMin <= cfg.MaxSignalAgeMinWatch:
+		d.SignalState = StateCooling
+	default:
+		d.SignalState = StateExpired
 	}
+
+	d.IsActionable = (d.Label == LabelBUY || d.Label == LabelREADY) &&
+		d.SignalState != StateExpired &&
+		signalAgeMin <= cfg.MaxSignalAgeMinBuyReady
 	return d
+}
+
+func terminalLifecycleReject(d Decision) bool {
+	if !d.Engine.Layer0Reject {
+		return false
+	}
+	reason := strings.ToLower(d.Engine.Layer0Reason)
+	return strings.Contains(reason, "self-bundl") || strings.Contains(reason, "hard rug")
 }
 
 // --- Module 6D: warm-up / confidence ---
@@ -987,9 +988,11 @@ func clusteringPriorityRank(status string) int {
 
 func signalFreshnessRank(state string) int {
 	switch state {
-	case StateFresh:
+	case StateForming:
+		return 3
+	case StateActive:
 		return 2
-	case StateStale:
+	case StateCooling:
 		return 1
 	default:
 		return 0

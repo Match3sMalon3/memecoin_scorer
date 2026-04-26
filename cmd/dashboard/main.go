@@ -780,12 +780,13 @@ func (a *App) renderWowIndexHTML() string {
 	heroPrimaryText := "NO TRADE"
 	heroPrimaryClass := "btn btn-disabled"
 	heroPrimaryHref := "#"
-	heroName := "NO LIVE CANDIDATE"
+	heroName := "NO LIVE RUNNER CANDIDATE"
 	heroMeta := "n/a"
 	heroState := "AVOID"
 	heroQuality := "DEAD"
 	heroTrigger := "no valid execution edge"
 	heroBlocker := "no valid execution edge"
+	heroEvidence := "Waiting for live early-runner evidence."
 	heroSolscan := wowDisabledSolscanHTML("heroSecondaryAction")
 	heroShadow := "shadow incomplete"
 	heroShadowTitle := "validated scorer shadow status"
@@ -794,30 +795,41 @@ func (a *App) renderWowIndexHTML() string {
 		heroName = wowTokenLabel(best)
 		heroMeta = shortAddress(stringFieldMap(best, "mint"))
 		heroState = wowStateText(best)
-		heroQuality = wowQualityTier(best)
-		heroTrigger = wowTriggerLine(best)
-		heroBlocker = wowFullBlocker(best, heroState)
+		heroQuality = earlyProxyBandGo(best)
+		heroTrigger = earlyProxyHeroLineGo(best)
+		heroEvidence = earlyProxyReasonsLineGo(best)
+		heroBlocker = earlyProxyRiskLineGo(best)
 		heroPrimaryHref = firstNonEmpty(stringFieldMap(best, "execution_url"), "#")
 		heroSolscan = wowHeroSolscanHTML(best)
 		heroShadow = wowShadowSummary(best)
 		heroShadowTitle = wowShadowTitle(best)
+	} else if hasLifecycleRowsGo(primaryRows, "forming") {
+		heroTrigger = "forming tokens observed, no runner footprint yet"
+		heroBlocker = "all forming rows are currently DEAD by early proxy"
+		heroEvidence = "Watch table rows for proxy upgrades; no hero candidate is active."
 	}
 
 	switch posture {
 	case "pristine":
-		pagePostureText = "SYSTEM: NOMINAL"
-		verdictBar = "HIGH CONVICTION SETUP DETECTED. EXECUTION ENABLED."
+		pagePostureText = "APEX RUNNER FORMING"
+		verdictBar = "EARLY PROXY APEX. STRUCTURAL RISKS SHOWN SEPARATELY."
 		heroPrimaryText = "EXECUTE [GMGN]"
 		heroPrimaryClass = "btn btn-exec"
-		heroBlocker = ""
 	case "defensive":
-		pagePostureText = "POSTURE: DEFENSIVE"
-		verdictBar = "BAD TAPE DETECTED. NO TRADE ZONE."
+		pagePostureText = earlyProxyPostureTextGo(best)
+		verdictBar = "EARLY PROXY LEAD FOUND. STRUCTURAL GATES ARE RISK ANNOTATIONS."
 		heroPrimaryText = "VIEW [GMGN]"
 		heroPrimaryClass = "btn btn-view"
-		if heroBlocker == "" || heroBlocker == "none" {
-			heroBlocker = "no valid execution edge"
+		if best != nil && lifecycleStateGo(best) == "forming" && !boolFieldMap(best, "is_actionable") {
+			pagePostureText = "FORMATION WATCH — NOT EXECUTION"
+			verdictBar = "EARLY FORMATION IS STILL ACCUMULATING EVIDENCE. DO NOT EXECUTE FROM LIFECYCLE ALONE."
 		}
+		if heroBlocker == "" || heroBlocker == "none" {
+			heroBlocker = "no structural risk flags"
+		}
+	case "no-trade":
+		pagePostureText = "NO EDGE"
+		verdictBar = "NO LIVE RUNNER CANDIDATE."
 	}
 
 	replacements := map[string]string{
@@ -832,7 +844,7 @@ func (a *App) renderWowIndexHTML() string {
 		"__HERO_QUALITY_CLASS__":    wowQualityBadgeClass(heroQuality),
 		"__HERO_QUALITY__":          html.EscapeString(heroQuality),
 		"__HERO_TRIGGER_LINE__":     html.EscapeString(heroTrigger),
-		"__HERO_SUPERIORITY__":      html.EscapeString(wowSuperiorityLine(heroQuality)),
+		"__HERO_SUPERIORITY__":      html.EscapeString(heroEvidence),
 		"__HERO_NO_TRADE_REASON__":  html.EscapeString(heroBlocker),
 		"__HERO_SHADOW__":           html.EscapeString(heroShadow),
 		"__HERO_SHADOW_TITLE__":     html.EscapeString(heroShadowTitle),
@@ -865,17 +877,15 @@ func rankedWowRows(rows []map[string]any, rejects bool) []map[string]any {
 }
 
 func wowRankScore(row map[string]any) float64 {
-	score := bestSetupScoreGo(row)
-	if heroEligibleGo(row) {
-		switch stringFieldMap(row, "priority_label") {
-		case "best_on_tape", "priority: best_on_tape":
-			score += 10000
-		case "monitor_for_upgrade", "priority: monitor_for_upgrade":
-			score += 5000
-		}
+	score := earlyProxyScoreGo(row)
+	if !heroEligibleGo(row) {
+		score -= 10000
+	}
+	if primaryLifecycleGo(row) {
+		score += 100
 	}
 	if wowIsPristine(row) {
-		score += 2000
+		score += 5
 	}
 	return score
 }
@@ -888,10 +898,17 @@ func wowPagePosture(primaryRows []map[string]any, best map[string]any) string {
 	if len(primaryRows) == 0 || best == nil {
 		return "no-trade"
 	}
-	if wowIsPristine(best) {
-		return "pristine"
+	if lifecycleStateGo(best) == "forming" && !boolFieldMap(best, "is_actionable") {
+		return "defensive"
 	}
-	return "defensive"
+	switch earlyProxyBandGo(best) {
+	case "APEX":
+		return "pristine"
+	case "CANDIDATE", "WATCH":
+		return "defensive"
+	default:
+		return "no-trade"
+	}
 }
 
 func wowIsPristine(row map[string]any) bool {
@@ -919,14 +936,16 @@ func renderWowScanRows(rows []map[string]any, best map[string]any, posture strin
 		if !rejects && wowSameMint(row, best) {
 			bestChip = `<span class="rank-chip">BEST NOW</span>`
 		}
+		proxyChip := earlyProxyCompactHTMLGo(row)
 		fmt.Fprintf(&b,
-			`<tr class="scan-row %s"><td><span class="badge %s">%s</span></td><td class="conf-cell">%d</td><td><div class="token-line"><span class="token-main">%s</span>%s</div><div class="token-sub">CA %s</div></td><td><div class="blocker %s" title="%s">%s</div></td><td><div class="trigger">%s</div></td><td>%s</td></tr>`,
+			`<tr class="scan-row %s"><td><span class="badge %s">%s</span></td><td class="conf-cell">%d</td><td><div class="token-line"><span class="token-main">%s</span>%s</div><div class="token-sub">CA %s%s</div></td><td><div class="blocker %s" title="%s">%s</div></td><td><div class="trigger">%s</div></td><td>%s</td></tr>`,
 			html.EscapeString(rowClass),
 			wowStateBadgeClass(state), html.EscapeString(state),
 			int(floatFieldMap(row, "confidence_score")+0.5),
 			html.EscapeString(wowTokenLabel(row)),
 			bestChip,
 			html.EscapeString(shortAddress(stringFieldMap(row, "mint"))),
+			proxyChip,
 			wowBlockerClass(row, state, fullBlocker), html.EscapeString(fullBlocker), html.EscapeString(wowCompactBlocker(fullBlocker)),
 			html.EscapeString(wowTriggerLine(row)),
 			wowRowActionsHTML(row, posture, state),
@@ -956,6 +975,14 @@ func wowRowClass(row map[string]any, best map[string]any, state string, rejects 
 }
 
 func wowStateText(row map[string]any) string {
+	switch lifecycleStateGo(row) {
+	case "forming":
+		return "FORMING"
+	case "cooling":
+		return "WATCH"
+	case "expired":
+		return "EXPIRED"
+	}
 	actionability := strings.ToLower(strings.TrimSpace(stringFieldMap(row, "actionability_label")))
 	decision := stringFieldMap(row, "decision")
 	if actionability == "actionable now" || decision == "BUY" || decision == "READY" {
@@ -972,10 +999,14 @@ func wowStateText(row map[string]any) string {
 
 func wowStateBadgeClass(state string) string {
 	switch state {
+	case "FORMING":
+		return "forming"
 	case "READY":
 		return "ready"
 	case "WATCH":
 		return "watch"
+	case "EXPIRED":
+		return "expired"
 	default:
 		return "avoid"
 	}
@@ -989,6 +1020,10 @@ func wowQualityBadgeClass(tier string) string {
 	switch tier {
 	case "APEX":
 		return "apex"
+	case "CANDIDATE":
+		return "near"
+	case "WATCH":
+		return "watch"
 	case "NEAR":
 		return "near"
 	case "TRAP":
@@ -1420,32 +1455,174 @@ func chooseBestSetupGo(rows []map[string]any) map[string]any {
 	if len(rows) == 0 {
 		return nil
 	}
-	for _, row := range rows {
-		if !heroEligibleGo(row) {
-			continue
+	groups := []struct {
+		name string
+		keep func(map[string]any) bool
+	}{
+		{name: "primary-nondead", keep: func(row map[string]any) bool { return primaryLifecycleGo(row) && !earlyProxyDeadGo(row) }},
+		{name: "cooling-nondead", keep: func(row map[string]any) bool { return coolingLifecycleGo(row) && !earlyProxyDeadGo(row) }},
+	}
+	for _, group := range groups {
+		var best map[string]any
+		for _, row := range rows {
+			if !group.keep(row) {
+				continue
+			}
+			if best == nil || earlyProxyLessGo(best, row) {
+				best = row
+			}
 		}
-		priority := stringFieldMap(row, "priority_label")
-		if priority == "best_on_tape" || priority == "priority: best_on_tape" {
-			return row
+		if best != nil {
+			_ = group.name
+			return best
 		}
 	}
-	var best map[string]any
-	bestScore := 0.0
-	for _, row := range rows {
-		if !heroEligibleGo(row) {
-			continue
-		}
-		score := bestSetupScoreGo(row)
-		if best == nil || score > bestScore {
-			best = row
-			bestScore = score
-		}
-	}
-	return best
+	return nil
 }
 
 func heroEligibleGo(s map[string]any) bool {
-	return strings.ToLower(stringFieldMap(s, "signal_state")) != "expired"
+	state := lifecycleStateGo(s)
+	return (state == "forming" || state == "active" || state == "cooling") && !earlyProxyDeadGo(s)
+}
+
+func lifecycleStateGo(s map[string]any) string {
+	state := strings.ToLower(strings.TrimSpace(stringFieldMap(s, "signal_state")))
+	if state == "" {
+		return "active"
+	}
+	return state
+}
+
+func primaryLifecycleGo(s map[string]any) bool {
+	state := lifecycleStateGo(s)
+	return state == "forming" || state == "active"
+}
+
+func coolingLifecycleGo(s map[string]any) bool {
+	return lifecycleStateGo(s) == "cooling"
+}
+
+func earlyProxyDeadGo(s map[string]any) bool {
+	return earlyProxyBandGo(s) == "DEAD"
+}
+
+func hasLifecycleRowsGo(rows []map[string]any, state string) bool {
+	for _, row := range rows {
+		if lifecycleStateGo(row) == state {
+			return true
+		}
+	}
+	return false
+}
+
+func earlyProxyLessGo(a map[string]any, b map[string]any) bool {
+	if earlyProxyScoreGo(a) != earlyProxyScoreGo(b) {
+		return earlyProxyScoreGo(a) < earlyProxyScoreGo(b)
+	}
+	if earlyProxyBandRankGo(a) != earlyProxyBandRankGo(b) {
+		return earlyProxyBandRankGo(a) < earlyProxyBandRankGo(b)
+	}
+	if stringFieldMap(a, "last_event_at") != stringFieldMap(b, "last_event_at") {
+		return stringFieldMap(a, "last_event_at") < stringFieldMap(b, "last_event_at")
+	}
+	if floatFieldMap(a, "confidence_score") != floatFieldMap(b, "confidence_score") {
+		return floatFieldMap(a, "confidence_score") < floatFieldMap(b, "confidence_score")
+	}
+	return stringFieldMap(a, "mint") > stringFieldMap(b, "mint")
+}
+
+func earlyProxyBandRankGo(s map[string]any) int {
+	switch earlyProxyBandGo(s) {
+	case "APEX":
+		return 4
+	case "CANDIDATE":
+		return 3
+	case "WATCH":
+		return 2
+	case "DEAD":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func earlyProxyMapGo(s map[string]any) map[string]any {
+	ep, _ := s["early_proxy"].(map[string]any)
+	return ep
+}
+
+func earlyProxyScoreGo(s map[string]any) float64 {
+	return floatFieldMap(earlyProxyMapGo(s), "score")
+}
+
+func earlyProxyThresholdGo(s map[string]any) float64 {
+	threshold := floatFieldMap(earlyProxyMapGo(s), "threshold")
+	if threshold <= 0 {
+		return 62
+	}
+	return threshold
+}
+
+func earlyProxyBandGo(s map[string]any) string {
+	return firstNonEmpty(stringFieldMap(earlyProxyMapGo(s), "band"), "DEAD")
+}
+
+func earlyProxyPostureTextGo(s map[string]any) string {
+	switch earlyProxyBandGo(s) {
+	case "APEX":
+		return "APEX RUNNER FORMING"
+	case "CANDIDATE":
+		return "RUNNER CANDIDATE"
+	case "WATCH":
+		return "WATCHLIST ONLY"
+	default:
+		return "NO EDGE"
+	}
+}
+
+func earlyProxyHeroLineGo(s map[string]any) string {
+	return fmt.Sprintf("proxy %.0f / %.0f • %s", earlyProxyScoreGo(s), earlyProxyThresholdGo(s), earlyProxyBandGo(s))
+}
+
+func earlyProxyReasonsLineGo(s map[string]any) string {
+	reasons := stringSliceFieldMap(earlyProxyMapGo(s), "reasons")
+	if len(reasons) > 3 {
+		reasons = reasons[:3]
+	}
+	if len(reasons) == 0 {
+		return "proxy evidence incomplete"
+	}
+	return strings.Join(reasons, " • ")
+}
+
+func earlyProxyRiskLineGo(s map[string]any) string {
+	risks := stringSliceFieldMap(earlyProxyMapGo(s), "risk_flags")
+	if len(risks) > 3 {
+		risks = risks[:3]
+	}
+	missing := len(stringSliceFieldMap(earlyProxyMapGo(s), "missing_fields"))
+	parts := make([]string, 0, 2)
+	if len(risks) > 0 {
+		parts = append(parts, strings.Join(risks, " • "))
+	}
+	if missing > 0 {
+		parts = append(parts, fmt.Sprintf("%d missing proxy fields", missing))
+	}
+	if len(parts) == 0 {
+		return "no structural risk flags"
+	}
+	return strings.Join(parts, " • ")
+}
+
+func earlyProxyCompactHTMLGo(s map[string]any) string {
+	ep := earlyProxyMapGo(s)
+	if len(ep) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(` <span class="proxy-chip">proxy %.0f %s</span>`,
+		floatFieldMap(ep, "score"),
+		html.EscapeString(firstNonEmpty(stringFieldMap(ep, "band"), "DEAD")),
+	)
 }
 
 func bestSetupScoreGo(s map[string]any) float64 {
@@ -1578,9 +1755,11 @@ func buyerQualityLabelGo(s map[string]any) string {
 
 func stateClassGo(state string) string {
 	switch state {
-	case "fresh":
+	case "forming":
+		return "forming"
+	case "active":
 		return "fresh"
-	case "stale":
+	case "cooling":
 		return "stale"
 	default:
 		return "expired"
@@ -1811,7 +1990,7 @@ html,body{
   background:var(--green-bg);
   border-color:rgba(0,255,102,.4);
 }
-.health-pill.defensive,.badge.watch,.badge.near{
+.health-pill.defensive,.badge.watch,.badge.near,.badge.forming{
   color:var(--amber);
   background:var(--amber-bg);
   border-color:rgba(255,204,0,.4);
@@ -2043,6 +2222,10 @@ html,body{
   color:var(--muted);
   font-size:9px;
 }
+.proxy-chip{
+  color:var(--amber);
+  font-weight:900;
+}
 .rank-chip{
   display:inline-flex;
   align-items:center;
@@ -2270,12 +2453,14 @@ th{position:sticky;top:0;background:#121a2b;z-index:1;font-size:11px;color:#9fb0
 .badge{display:inline-block;padding:2px 7px;border-radius:999px;font-size:11px;font-weight:600}
 .badge.buy{background:#0f3a24;color:#7ef0b2;border:1px solid #2a6644}
 .badge.ready{background:#1e3a07;color:#a3e635;border:1px solid #3d6e10}
+.badge.forming{background:#16313a;color:#7dd3fc;border:1px solid #256f86}
 .badge.watch{background:#3a2c07;color:#ffd76a;border:1px solid #6e540e}
 .badge.avoid{background:#2a1515;color:#f87171;border:1px solid #6e2a2a}
 .badge.tradeable{background:#153d2b;color:#7ef0b2}
 .badge.clean{background:#3a2c07;color:#ffd76a}
 .badge.no{background:#2a2230;color:#b9a8c9}
 .badge.fresh{background:#0d2a1a;color:#7ef0b2;font-size:10px}
+.badge.forming{background:#11313a;color:#7dd3fc;font-size:10px}
 .badge.stale{background:#2e2200;color:#ffd76a;font-size:10px}
 .badge.expired{background:#1f1010;color:#9ca3af;font-size:10px}
 .badge.clustered{background:#1a1535;color:#a78bfa;font-size:10px}
@@ -2635,7 +2820,7 @@ async function loadLive() {
 		const decClass = dec === "BUY" ? "buy" : dec === "READY" ? "ready" : dec === "WATCH" ? "watch" : "avoid";
 
 		// Signal state badge
-		const stateClass = state === "fresh" ? "fresh" : state === "stale" ? "stale" : "expired";
+		const stateClass = state === "forming" ? "forming" : state === "active" ? "fresh" : state === "cooling" ? "stale" : "expired";
 
 		// Confidence colour
 		const confStyle = conf >= 70 ? "color:#7ef0b2" : conf >= 45 ? "color:#ffd76a" : "color:#f87171";
@@ -2988,15 +3173,53 @@ function rowClassForPriority(priority) {
 
 function chooseBestSetup(rows) {
 	if (!rows || rows.length === 0) return null;
-	const eligibleRows = rows.filter(heroEligible);
-	const backendBest = eligibleRows.find(x => x.priority_label === "best_on_tape" || x.priority_label === "priority: best_on_tape");
-	if (backendBest) return backendBest;
-	const scored = [...eligibleRows].sort((a, b) => bestSetupScore(b) - bestSetupScore(a));
-	return scored[0] || null;
+	const groups = [
+		rows.filter(s => primaryLifecycle(s) && earlyProxyBand(s) !== "DEAD"),
+		rows.filter(s => lifecycleState(s) === "cooling" && earlyProxyBand(s) !== "DEAD"),
+	];
+	for (const group of groups) {
+		const scored = [...group].sort((a, b) => {
+		const proxyDelta = earlyProxyScore(b) - earlyProxyScore(a);
+		if (proxyDelta !== 0) return proxyDelta;
+		const bandDelta = earlyProxyBandRank(b) - earlyProxyBandRank(a);
+		if (bandDelta !== 0) return bandDelta;
+		return String(b.last_event_at || "").localeCompare(String(a.last_event_at || ""));
+	});
+		if (scored[0]) return scored[0];
+	}
+	return null;
 }
 
 function heroEligible(s) {
-	return String((s && s.signal_state) || "").toLowerCase() !== "expired";
+	const state = lifecycleState(s);
+	return (state === "forming" || state === "active" || state === "cooling") && earlyProxyBand(s) !== "DEAD";
+}
+
+function lifecycleState(s) {
+	return String((s && s.signal_state) || "active").toLowerCase();
+}
+
+function primaryLifecycle(s) {
+	const state = lifecycleState(s);
+	return state === "forming" || state === "active";
+}
+
+function earlyProxyScore(s) {
+	return Number((s && s.early_proxy && s.early_proxy.score) || 0);
+}
+
+function earlyProxyBand(s) {
+	return String((s && s.early_proxy && s.early_proxy.band) || "DEAD").toUpperCase();
+}
+
+function earlyProxyBandRank(s) {
+	switch (earlyProxyBand(s)) {
+	case "APEX": return 4;
+	case "CANDIDATE": return 3;
+	case "WATCH": return 2;
+	case "DEAD": return 1;
+	default: return 0;
+	}
 }
 
 function bestSetupScore(s) {

@@ -204,11 +204,27 @@ func TestFreshness_BUY_Fresh_WithinWindow(t *testing.T) {
 	if d.Label != live.LabelBUY {
 		t.Fatalf("expected BUY label, got %q; reasons: %v", d.Label, d.Reasons)
 	}
-	if d.SignalState != live.StateFresh {
-		t.Errorf("signal_state=%q, want fresh", d.SignalState)
+	if d.SignalState != live.StateActive {
+		t.Errorf("signal_state=%q, want active", d.SignalState)
 	}
 	if !d.IsActionable {
 		t.Errorf("is_actionable must be true for fresh BUY")
+	}
+}
+
+func TestFreshness_RecentLastEventNotExpiredEvenIfFirstSeenIsOld(t *testing.T) {
+	now := epoch.Add(2 * time.Hour)
+	s := freshSnap(now)
+	s.FirstSeenAt = now.Add(-90 * time.Minute)
+	s.AgeSeconds = 90 * 60
+	s.LastEventAt = now.Add(-2 * time.Minute)
+
+	d := live.ClassifyAt(s, cfgWithNow(), now)
+	if d.SignalState == live.StateExpired {
+		t.Fatalf("signal_state=%q, want non-expired based on recent LastEventAt", d.SignalState)
+	}
+	if !d.IsActionable {
+		t.Fatalf("is_actionable=false, want true for recent LastEventAt")
 	}
 }
 
@@ -220,11 +236,11 @@ func TestFreshness_BUY_Expired_BeyondWindow(t *testing.T) {
 	if d.Label != live.LabelBUY {
 		t.Fatalf("expected BUY label, got %q", d.Label)
 	}
-	if d.SignalState != live.StateExpired {
-		t.Errorf("signal_state=%q, want expired", d.SignalState)
+	if d.SignalState != live.StateCooling {
+		t.Errorf("signal_state=%q, want cooling", d.SignalState)
 	}
 	if d.IsActionable {
-		t.Errorf("is_actionable must be false for expired BUY")
+		t.Errorf("is_actionable must be false for cooling BUY")
 	}
 }
 
@@ -240,11 +256,11 @@ func TestFreshness_READY_Expired_BeyondWindow(t *testing.T) {
 	if d.Label != live.LabelREADY {
 		t.Fatalf("expected READY, got %q; reasons: %v", d.Label, d.Reasons)
 	}
-	if d.SignalState != live.StateExpired {
-		t.Errorf("signal_state=%q, want expired", d.SignalState)
+	if d.SignalState != live.StateCooling {
+		t.Errorf("signal_state=%q, want cooling", d.SignalState)
 	}
 	if d.IsActionable {
-		t.Errorf("is_actionable must be false for expired READY")
+		t.Errorf("is_actionable must be false for cooling READY")
 	}
 }
 
@@ -267,11 +283,11 @@ func TestFreshness_WATCH_Stale_BetweenBuyReadyAndWatchWindow(t *testing.T) {
 	if d.Label != live.LabelWATCH {
 		t.Fatalf("expected WATCH, got %q; reasons: %v", d.Label, d.Reasons)
 	}
-	if d.SignalState != live.StateStale {
-		t.Errorf("signal_state=%q, want stale (8m > buyready window 5m, < watch window 15m)", d.SignalState)
+	if d.SignalState != live.StateCooling {
+		t.Errorf("signal_state=%q, want cooling (8m > buyready window 5m, < watch window 15m)", d.SignalState)
 	}
-	if !d.IsActionable {
-		t.Errorf("is_actionable must be true: still within WATCH window")
+	if d.IsActionable {
+		t.Errorf("is_actionable must be false for non-tradeable WATCH")
 	}
 }
 
@@ -302,10 +318,92 @@ func TestFreshness_BoundaryExact_BuyReady(t *testing.T) {
 	// Exactly at the threshold: not expired.
 	now := epoch.Add(time.Hour)
 	s := freshSnap(now)
-	s.LastEventAt = now.Add(-5 * time.Minute) // exactly MaxSignalAgeMinBuyReady(5) — fresh
+	s.LastEventAt = now.Add(-5 * time.Minute) // exactly MaxSignalAgeMinBuyReady(5) — active
 	d := live.ClassifyAt(s, cfgWithNow(), now)
 	if d.SignalState == live.StateExpired {
-		t.Errorf("signal_state=%q at exactly the threshold, want fresh", d.SignalState)
+		t.Errorf("signal_state=%q at exactly the threshold, want active", d.SignalState)
+	}
+}
+
+func TestLifecycle_YoungWeakExecutionIsFormingNotExpired(t *testing.T) {
+	now := epoch.Add(time.Hour)
+	s := model.TokenSnapshot{
+		Mint:             "YOUNGWEAK",
+		FirstSeenAt:      now.Add(-90 * time.Second),
+		LastEventAt:      now.Add(-10 * time.Second),
+		UniqueBuyerCount: 1,
+		TotalBuySOL:      0.2,
+		TotalSellSOL:     0,
+		BuyersLast1m:     1,
+		BuyersLast5m:     1,
+		AgeSeconds:       90,
+	}
+
+	d := live.ClassifyAt(s, cfgWithNow(), now)
+	if d.SignalState != live.StateForming {
+		t.Fatalf("signal_state=%q, want forming for under-5m weak execution row", d.SignalState)
+	}
+	if d.IsActionable {
+		t.Fatalf("is_actionable=true, want false for weak forming row")
+	}
+}
+
+func TestLifecycle_OldTokenWithRecentLastEventIsActive(t *testing.T) {
+	now := epoch.Add(time.Hour)
+	s := freshSnap(now)
+	s.FirstSeenAt = now.Add(-20 * time.Minute)
+	s.AgeSeconds = 20 * 60
+	s.LastEventAt = now.Add(-2 * time.Minute)
+
+	d := live.ClassifyAt(s, cfgWithNow(), now)
+	if d.SignalState != live.StateActive {
+		t.Fatalf("signal_state=%q, want active", d.SignalState)
+	}
+}
+
+func TestLifecycle_OldQuietTokenCoolsBeforeExpiring(t *testing.T) {
+	now := epoch.Add(time.Hour)
+	s := freshSnap(now)
+	s.FirstSeenAt = now.Add(-20 * time.Minute)
+	s.AgeSeconds = 20 * 60
+	s.LastEventAt = now.Add(-8 * time.Minute)
+
+	d := live.ClassifyAt(s, cfgWithNow(), now)
+	if d.SignalState != live.StateCooling {
+		t.Fatalf("signal_state=%q, want cooling inside watch window", d.SignalState)
+	}
+
+	s.LastEventAt = now.Add(-20 * time.Minute)
+	d = live.ClassifyAt(s, cfgWithNow(), now)
+	if d.SignalState != live.StateExpired {
+		t.Fatalf("signal_state=%q, want expired beyond watch window", d.SignalState)
+	}
+}
+
+func TestLifecycle_ImpossibleExecutionBeforeFiveMinutesDoesNotExpire(t *testing.T) {
+	now := epoch.Add(time.Hour)
+	s := model.TokenSnapshot{
+		Mint:             "YOUNGIMPOSSIBLE",
+		FirstSeenAt:      now.Add(-2 * time.Minute),
+		LastEventAt:      now.Add(-5 * time.Second),
+		UniqueBuyerCount: 4,
+		TotalBuySOL:      0.5,
+		TotalSellSOL:     0,
+		LiquidityPoolSOL: 2,
+		BuyersLast1m:     4,
+		BuyersLast5m:     4,
+		AgeSeconds:       120,
+	}
+
+	d := live.ClassifyAt(s, cfgWithNow(), now)
+	if !d.Engine.Layer0Reject {
+		t.Fatalf("expected layer0 reject for impossible execution fixture")
+	}
+	if d.SignalState != live.StateForming {
+		t.Fatalf("signal_state=%q, want forming despite impossible execution before 5m", d.SignalState)
+	}
+	if d.IsActionable {
+		t.Fatalf("is_actionable=true, want false when layer0 execution is impossible")
 	}
 }
 
@@ -323,7 +421,7 @@ func TestPriorityLabels_ExpiredRowCannotRemainHeroWhenFresherRowsExist(t *testin
 	old := priorityRow("OLD", live.StateExpired, epoch.Add(-20*time.Minute))
 	old.ConfidenceScore = 100
 
-	fresh := priorityRow("FRESH", live.StateFresh, epoch.Add(-1*time.Minute))
+	fresh := priorityRow("FRESH", live.StateActive, epoch.Add(-1*time.Minute))
 	fresh.ConfidenceScore = 80
 
 	rows := []model.LiveSnapshot{old, fresh}
@@ -338,8 +436,8 @@ func TestPriorityLabels_ExpiredRowCannotRemainHeroWhenFresherRowsExist(t *testin
 }
 
 func TestPriorityLabels_NewerLastEventWinsAmongSimilarlyRankedRows(t *testing.T) {
-	older := priorityRow("OLDER", live.StateFresh, epoch.Add(-2*time.Minute))
-	newer := priorityRow("NEWER", live.StateFresh, epoch.Add(-30*time.Second))
+	older := priorityRow("OLDER", live.StateActive, epoch.Add(-2*time.Minute))
+	newer := priorityRow("NEWER", live.StateActive, epoch.Add(-30*time.Second))
 
 	rows := []model.LiveSnapshot{older, newer}
 	live.AssignPriorityLabels(rows)
@@ -354,7 +452,7 @@ func TestPriorityLabels_NewerLastEventWinsAmongSimilarlyRankedRows(t *testing.T)
 
 func TestPriorityLabels_ExpiredRowsRemainVisibleButNotHero(t *testing.T) {
 	expired := priorityRow("EXPIRED", live.StateExpired, epoch.Add(-20*time.Minute))
-	fresh := priorityRow("FRESH", live.StateFresh, epoch.Add(-1*time.Minute))
+	fresh := priorityRow("FRESH", live.StateActive, epoch.Add(-1*time.Minute))
 
 	rows := []model.LiveSnapshot{expired, fresh}
 	live.AssignPriorityLabels(rows)

@@ -430,9 +430,19 @@ func TestSnapshots_FieldsPresent(t *testing.T) {
 	for _, field := range []string{
 		"decision", "reasons", "execution_penalty", "liquidity_proxy_sol",
 		"adversarial_score", "trade_size_sol", "estimated_impact_pct",
+		"early_proxy",
 	} {
 		if _, ok := s[field]; !ok {
 			t.Errorf("ScoredSnapshot field %q missing from response", field)
+		}
+	}
+	earlyProxy, ok := s["early_proxy"].(map[string]any)
+	if !ok {
+		t.Fatalf("early_proxy = %T, want object", s["early_proxy"])
+	}
+	for _, field := range []string{"score", "threshold", "band", "evidence_version"} {
+		if _, ok := earlyProxy[field]; !ok {
+			t.Errorf("early_proxy field %q missing from response", field)
 		}
 	}
 
