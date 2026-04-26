@@ -772,10 +772,7 @@ func (a *App) renderWowIndexHTML() string {
 
 	primaryRows := rankedWowRows(rows, false)
 	rejectRows := rankedWowRows(rows, true)
-	var best map[string]any
-	if len(primaryRows) > 0 {
-		best = primaryRows[0]
-	}
+	best := chooseBestSetupGo(primaryRows)
 
 	posture := wowPagePosture(primaryRows, best)
 	pagePostureText := "NO TRADE"
@@ -789,7 +786,9 @@ func (a *App) renderWowIndexHTML() string {
 	heroQuality := "DEAD"
 	heroTrigger := "no valid execution edge"
 	heroBlocker := "no valid execution edge"
-	heroDex := wowDisabledDexHTML("heroSecondaryAction", "btn btn-disabled")
+	heroSolscan := wowDisabledSolscanHTML("heroSecondaryAction")
+	heroShadow := "shadow incomplete"
+	heroShadowTitle := "validated scorer shadow status"
 
 	if best != nil {
 		heroName = wowTokenLabel(best)
@@ -799,7 +798,9 @@ func (a *App) renderWowIndexHTML() string {
 		heroTrigger = wowTriggerLine(best)
 		heroBlocker = wowFullBlocker(best, heroState)
 		heroPrimaryHref = firstNonEmpty(stringFieldMap(best, "execution_url"), "#")
-		heroDex = wowHeroDexHTML(best)
+		heroSolscan = wowHeroSolscanHTML(best)
+		heroShadow = wowShadowSummary(best)
+		heroShadowTitle = wowShadowTitle(best)
 	}
 
 	switch posture {
@@ -833,10 +834,12 @@ func (a *App) renderWowIndexHTML() string {
 		"__HERO_TRIGGER_LINE__":     html.EscapeString(heroTrigger),
 		"__HERO_SUPERIORITY__":      html.EscapeString(wowSuperiorityLine(heroQuality)),
 		"__HERO_NO_TRADE_REASON__":  html.EscapeString(heroBlocker),
+		"__HERO_SHADOW__":           html.EscapeString(heroShadow),
+		"__HERO_SHADOW_TITLE__":     html.EscapeString(heroShadowTitle),
 		"__HERO_PRIMARY_HREF__":     html.EscapeString(heroPrimaryHref),
 		"__HERO_PRIMARY_CLASS__":    heroPrimaryClass,
 		"__HERO_PRIMARY_TEXT__":     html.EscapeString(heroPrimaryText),
-		"__HERO_SECONDARY_ACTION__": heroDex,
+		"__HERO_SECONDARY_ACTION__": heroSolscan,
 		"__PRIMARY_SCAN_ROWS__":     renderWowScanRows(primaryRows, best, posture, false),
 		"__REJECT_SCAN_ROWS__":      renderWowScanRows(rejectRows, best, posture, true),
 	}
@@ -863,11 +866,13 @@ func rankedWowRows(rows []map[string]any, rejects bool) []map[string]any {
 
 func wowRankScore(row map[string]any) float64 {
 	score := bestSetupScoreGo(row)
-	switch stringFieldMap(row, "priority_label") {
-	case "best_on_tape", "priority: best_on_tape":
-		score += 10000
-	case "monitor_for_upgrade", "priority: monitor_for_upgrade":
-		score += 5000
+	if heroEligibleGo(row) {
+		switch stringFieldMap(row, "priority_label") {
+		case "best_on_tape", "priority: best_on_tape":
+			score += 10000
+		case "monitor_for_upgrade", "priority: monitor_for_upgrade":
+			score += 5000
+		}
 	}
 	if wowIsPristine(row) {
 		score += 2000
@@ -1111,11 +1116,11 @@ func wowTriggerLine(row map[string]any) string {
 	}
 	exec := "thin liq"
 	if liq := floatFieldMap(row, "liquidity_proxy_sol"); engineLayer0RejectGo(row) && liq > 0 {
-		exec = fmt.Sprintf("liq %.2f", liq)
+		exec = fmt.Sprintf("liq %.2f SOL", liq)
 	} else if impact := floatFieldMap(row, "estimated_impact_pct"); impact > 0 {
-		exec = fmt.Sprintf("impact %.1f", impact)
+		exec = fmt.Sprintf("impact %.1f%%", impact)
 	} else if liq > 0 {
-		exec = fmt.Sprintf("liq %.2f", liq)
+		exec = fmt.Sprintf("liq %.2f SOL", liq)
 	}
 	return strings.Join([]string{flow, cluster, exec}, " • ")
 }
@@ -1145,24 +1150,73 @@ func wowRowActionsHTML(row map[string]any, posture string, state string) string 
 	} else {
 		b.WriteString(`<span class="action-link muted">GMGN N/A</span>`)
 	}
-	if href := strings.TrimSpace(stringFieldMap(row, "dexscreener_url")); href != "" {
-		fmt.Fprintf(&b, `<a class="action-link dex" href="%s" target="_blank" rel="noopener noreferrer">DEXSCREENER</a>`, html.EscapeString(href))
+	if href := strings.TrimSpace(stringFieldMap(row, "solscan_url")); href != "" {
+		fmt.Fprintf(&b, `<a class="action-link solscan" href="%s" target="_blank" rel="noopener noreferrer">SOLSCAN ↗</a>`, html.EscapeString(href))
 	} else {
-		b.WriteString(`<span class="action-link muted">DEX N/A</span>`)
+		b.WriteString(`<span class="action-muted">SOLSCAN unavailable</span>`)
 	}
 	b.WriteString(`</div>`)
 	return b.String()
 }
 
-func wowHeroDexHTML(row map[string]any) string {
-	if href := strings.TrimSpace(stringFieldMap(row, "dexscreener_url")); href != "" {
-		return fmt.Sprintf(`<a id="heroSecondaryAction" href="%s" class="btn btn-dex" target="_blank" rel="noopener noreferrer">DEXSCREENER</a>`, html.EscapeString(href))
+func wowHeroSolscanHTML(row map[string]any) string {
+	if href := strings.TrimSpace(stringFieldMap(row, "solscan_url")); href != "" {
+		return fmt.Sprintf(`<a id="heroSecondaryAction" href="%s" class="btn btn-solscan" target="_blank" rel="noopener noreferrer">SOLSCAN ↗</a>`, html.EscapeString(href))
 	}
-	return wowDisabledDexHTML("heroSecondaryAction", "btn btn-disabled")
+	return wowDisabledSolscanHTML("heroSecondaryAction")
 }
 
-func wowDisabledDexHTML(id string, className string) string {
-	return fmt.Sprintf(`<span id="%s" class="%s">DEX N/A</span>`, html.EscapeString(id), html.EscapeString(className))
+func wowDisabledSolscanHTML(id string) string {
+	return fmt.Sprintf(`<span id="%s" class="solscan-unavailable">SOLSCAN unavailable</span>`, html.EscapeString(id))
+}
+
+func wowShadowSummary(row map[string]any) string {
+	shadow, ok := row["shadow"].(map[string]any)
+	if !ok {
+		return "shadow incomplete: no evidence"
+	}
+	if boolFieldMap(shadow, "eligible_for_shadow_score") {
+		return fmt.Sprintf("shadow score: tradeable=%s • clean=%s • opp %.1f",
+			wowOptionalBool(shadow, "validated_tradeable_30m"),
+			wowOptionalBool(shadow, "validated_clean_30m"),
+			floatFieldMap(shadow, "opportunity_score"),
+		)
+	}
+	missing := stringSliceFieldMap(shadow, "missing_fields")
+	if len(missing) == 0 && !boolFieldMap(shadow, "feature_window_complete") {
+		return "shadow incomplete: window pending"
+	}
+	return fmt.Sprintf("shadow incomplete: %d missing", len(missing))
+}
+
+func wowShadowTitle(row map[string]any) string {
+	shadow, ok := row["shadow"].(map[string]any)
+	if !ok {
+		return "shadow object missing from row"
+	}
+	notes := stringSliceFieldMap(shadow, "notes")
+	missing := stringSliceFieldMap(shadow, "missing_fields")
+	parts := make([]string, 0, 2)
+	if len(notes) > 0 {
+		parts = append(parts, strings.Join(notes, " | "))
+	}
+	if len(missing) > 0 {
+		parts = append(parts, "missing: "+strings.Join(missing, ", "))
+	}
+	if len(parts) == 0 {
+		return "validated shadow score complete"
+	}
+	return strings.Join(parts, " | ")
+}
+
+func wowOptionalBool(row map[string]any, key string) string {
+	if v, ok := row[key].(bool); ok {
+		if v {
+			return "true"
+		}
+		return "false"
+	}
+	return "n/a"
 }
 
 func bestHeadline(rows []map[string]any) string {
@@ -1367,21 +1421,31 @@ func chooseBestSetupGo(rows []map[string]any) map[string]any {
 		return nil
 	}
 	for _, row := range rows {
+		if !heroEligibleGo(row) {
+			continue
+		}
 		priority := stringFieldMap(row, "priority_label")
 		if priority == "best_on_tape" || priority == "priority: best_on_tape" {
 			return row
 		}
 	}
-	best := rows[0]
-	bestScore := bestSetupScoreGo(best)
-	for _, row := range rows[1:] {
+	var best map[string]any
+	bestScore := 0.0
+	for _, row := range rows {
+		if !heroEligibleGo(row) {
+			continue
+		}
 		score := bestSetupScoreGo(row)
-		if score > bestScore {
+		if best == nil || score > bestScore {
 			best = row
 			bestScore = score
 		}
 	}
 	return best
+}
+
+func heroEligibleGo(s map[string]any) bool {
+	return strings.ToLower(stringFieldMap(s, "signal_state")) != "expired"
 }
 
 func bestSetupScoreGo(s map[string]any) float64 {
@@ -1633,6 +1697,31 @@ func joinListFieldMap(m map[string]any, key string) string {
 	}
 }
 
+func stringSliceFieldMap(m map[string]any, key string) []string {
+	if m == nil {
+		return nil
+	}
+	switch v := m[key].(type) {
+	case []string:
+		return v
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return nil
+		}
+		return []string{v}
+	default:
+		return nil
+	}
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, v := range values {
 		if strings.TrimSpace(v) != "" {
@@ -1764,48 +1853,48 @@ html,body{
 }
 .hero{
   display:grid;
-  grid-template-columns:220px 1fr 200px;
-  gap:16px;
+  grid-template-columns:210px 1fr 190px;
+  gap:12px;
   align-items:center;
-  padding:12px 14px;
+  padding:9px 12px;
   border-bottom:1px solid var(--border);
   background:linear-gradient(180deg,#0a0a0a,#070707);
 }
 .hero.pristine{
-  box-shadow:inset 4px 0 0 var(--green);
+  box-shadow:inset 5px 0 0 var(--green);
 }
 .hero.defensive{
   background:linear-gradient(180deg,#131000,#080700);
-  box-shadow:inset 4px 0 0 var(--amber);
+  box-shadow:inset 5px 0 0 var(--amber);
 }
 .hero.no-trade{
   background:linear-gradient(180deg,#120707,#070404);
-  box-shadow:inset 4px 0 0 var(--red);
+  box-shadow:inset 5px 0 0 var(--red);
 }
 .hero-left,.hero-middle{
   min-width:0;
 }
 .hero-name{
   margin:0;
-  font-size:21px;
+  font-size:20px;
   line-height:1;
   font-weight:900;
   color:#fff;
 }
 .hero-meta{
-  margin-top:5px;
+  margin-top:4px;
   color:var(--muted);
   font-size:10px;
 }
 .badge-row{
   display:flex;
   flex-wrap:wrap;
-  gap:6px;
-  margin-top:8px;
+  gap:5px;
+  margin-top:6px;
 }
 .hero-middle{
   border-left:2px solid var(--green);
-  padding-left:14px;
+  padding-left:12px;
 }
 .hero.defensive .hero-middle{
   border-left-color:var(--amber);
@@ -1815,12 +1904,12 @@ html,body{
 }
 .hero-trigger{
   color:#fff;
-  font-size:13px;
+  font-size:12px;
   font-weight:800;
-  line-height:1.3;
+  line-height:1.25;
 }
 .hero-superiority{
-  margin-top:6px;
+  margin-top:4px;
   color:var(--green);
   font-size:10px;
   font-style:italic;
@@ -1832,23 +1921,29 @@ html,body{
   color:var(--red);
 }
 .hero-reason{
-  min-height:13px;
-  margin-top:6px;
+  min-height:11px;
+  margin-top:4px;
   color:var(--red);
   font-size:10px;
   font-weight:700;
 }
+.hero-shadow{
+  margin-top:3px;
+  color:var(--muted);
+  font-size:9px;
+  font-weight:800;
+}
 .hero-right{
   display:flex;
   flex-direction:column;
-  gap:6px;
+  gap:5px;
 }
 .btn{
   display:block;
   width:100%;
   box-sizing:border-box;
   text-align:center;
-  padding:10px 8px;
+  padding:8px 8px;
   border-radius:3px;
   text-decoration:none;
   font-weight:950;
@@ -1865,7 +1960,7 @@ html,body{
   color:#000;
   box-shadow:0 0 18px rgba(255,204,0,.14);
 }
-.btn-dex{
+.btn-solscan{
   background:var(--blue-bg);
   color:var(--blue);
   border-color:rgba(98,176,255,.45);
@@ -1875,6 +1970,16 @@ html,body{
   color:#555;
   border-color:var(--border);
   pointer-events:none;
+}
+.solscan-unavailable{
+  display:block;
+  width:100%;
+  box-sizing:border-box;
+  padding:4px 2px;
+  color:#666;
+  font-size:10px;
+  font-weight:800;
+  text-align:center;
 }
 .table-wrap{
   padding-bottom:14px;
@@ -1905,8 +2010,8 @@ html,body{
   background:#0b0b0b;
 }
 .scan-row.best{
-  background:linear-gradient(90deg,rgba(0,255,102,.13),rgba(0,255,102,.03));
-  box-shadow:inset 5px 0 0 var(--green);
+  background:linear-gradient(90deg,rgba(0,255,102,.2),rgba(0,255,102,.045));
+  box-shadow:inset 7px 0 0 var(--green), inset 0 1px 0 rgba(0,255,102,.18);
 }
 .scan-row.watch{
   background:rgba(255,204,0,.035);
@@ -1987,15 +2092,20 @@ html,body{
   color:#000;
   background:var(--green);
 }
-.action-link.dex{
+.scan-row.best .action-link.gmgn{
+  color:#000;
+  background:#33ff85;
+  box-shadow:0 0 14px rgba(0,255,102,.24);
+}
+.action-link.solscan{
   color:var(--blue);
   background:var(--blue-bg);
   border-color:rgba(98,176,255,.45);
 }
-.action-link.muted{
-  color:#606060;
-  background:#101010;
-  border-color:var(--border);
+.action-muted{
+  color:#686868;
+  font-size:9px;
+  font-weight:800;
 }
 .secondary-panel{
   margin-top:6px;
@@ -2060,6 +2170,7 @@ html,body{
       <div id="heroTriggerLine" class="hero-trigger">__HERO_TRIGGER_LINE__</div>
       <div id="heroSuperiority" class="hero-superiority">__HERO_SUPERIORITY__</div>
       <div id="heroNoTradeReason" class="hero-reason">__HERO_NO_TRADE_REASON__</div>
+      <div id="heroShadow" class="hero-shadow" title="__HERO_SHADOW_TITLE__">__HERO_SHADOW__</div>
     </div>
 
     <div class="hero-right">
@@ -2877,10 +2988,15 @@ function rowClassForPriority(priority) {
 
 function chooseBestSetup(rows) {
 	if (!rows || rows.length === 0) return null;
-	const backendBest = rows.find(x => x.priority_label === "best_on_tape" || x.priority_label === "priority: best_on_tape");
+	const eligibleRows = rows.filter(heroEligible);
+	const backendBest = eligibleRows.find(x => x.priority_label === "best_on_tape" || x.priority_label === "priority: best_on_tape");
 	if (backendBest) return backendBest;
-	const scored = [...rows].sort((a, b) => bestSetupScore(b) - bestSetupScore(a));
+	const scored = [...eligibleRows].sort((a, b) => bestSetupScore(b) - bestSetupScore(a));
 	return scored[0] || null;
+}
+
+function heroEligible(s) {
+	return String((s && s.signal_state) || "").toLowerCase() !== "expired";
 }
 
 function bestSetupScore(s) {

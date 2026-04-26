@@ -15,6 +15,7 @@ func sampleLiveRow() map[string]any {
 		"why_not_higher":        "impossible execution • thin liquidity",
 		"why_now":               "5 eff buyers /1m • 5 eff buyers /5m • clean clustering",
 		"execution_url":         "https://gmgn.ai/sol/token/RENDERMINT123456789",
+		"solscan_url":           "https://solscan.io/token/RENDERMINT123456789",
 		"signal_state":          "expired",
 		"confidence_score":      66.0,
 		"buyers_last1m":         5.0,
@@ -69,17 +70,51 @@ func TestRenderIndexHTML_ServerRendersPostureHeroScan(t *testing.T) {
 		`id="heroSecondaryAction"`,
 		`id="primaryScanBody"`,
 		`id="rejectsPanel"`,
-		`BEST NOW`,
-		`DEX N/A`,
+		`NO LIVE CANDIDATE`,
 		`<th>actions</th>`,
 		`VIEW [GMGN]`,
+		`https://gmgn.ai/sol/token/RENDERMINT123456789`,
+		`https://solscan.io/token/RENDERMINT123456789`,
+		`SOLSCAN ↗`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("posture scan markup %q missing: %s", want, html)
 		}
 	}
+	if strings.Contains(html, `DEX unavailable`) {
+		t.Fatalf("old Dex fallback should not render: %s", html)
+	}
 	if strings.Contains(html, `trigger = flow`) {
 		t.Fatalf("helper trigger copy should not render: %s", html)
+	}
+}
+
+func TestChooseBestSetupGo_IgnoresExpiredRows(t *testing.T) {
+	expired := sampleLiveRow()
+	expired["priority_label"] = "best_on_tape"
+	expired["confidence_score"] = 100.0
+
+	fresh := sampleLiveRow()
+	fresh["mint"] = "FRESHMINT123456789"
+	fresh["signal_state"] = "fresh"
+	fresh["priority_label"] = "monitor_for_upgrade"
+	fresh["confidence_score"] = 50.0
+
+	best := chooseBestSetupGo([]map[string]any{expired, fresh})
+	if best == nil {
+		t.Fatalf("best=nil, want fresh row")
+	}
+	if got := stringFieldMap(best, "mint"); got != "FRESHMINT123456789" {
+		t.Fatalf("best mint=%q, want fresh row", got)
+	}
+}
+
+func TestChooseBestSetupGo_AllExpiredReturnsNil(t *testing.T) {
+	expired := sampleLiveRow()
+	expired["priority_label"] = "best_on_tape"
+
+	if best := chooseBestSetupGo([]map[string]any{expired}); best != nil {
+		t.Fatalf("best=%v, want nil when every row is expired", best)
 	}
 }
 

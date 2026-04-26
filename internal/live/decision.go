@@ -498,6 +498,14 @@ func BuildExecutionURL(mint string) string {
 	return "https://gmgn.ai/sol/token/" + mint
 }
 
+func BuildSolscanURL(mint string) string {
+	mint = strings.TrimSpace(mint)
+	if mint == "" {
+		return ""
+	}
+	return "https://solscan.io/token/" + mint
+}
+
 func BuildDexscreenerURL(_ string) string {
 	return ""
 }
@@ -535,11 +543,11 @@ func BuildTriggerLine(s *model.LiveSnapshot) string {
 	}
 
 	if s.Engine.Layer0Reject && s.LiquidityProxySOL > 0 {
-		fragments = append(fragments, fmt.Sprintf("liq %.2f", s.LiquidityProxySOL))
+		fragments = append(fragments, fmt.Sprintf("liq %.2f SOL", s.LiquidityProxySOL))
 	} else if s.EstimatedImpactPct > 0 {
-		fragments = append(fragments, fmt.Sprintf("impact %.1f", s.EstimatedImpactPct))
+		fragments = append(fragments, fmt.Sprintf("impact %.1f%%", s.EstimatedImpactPct))
 	} else if s.LiquidityProxySOL > 0 {
-		fragments = append(fragments, fmt.Sprintf("liq %.2f", s.LiquidityProxySOL))
+		fragments = append(fragments, fmt.Sprintf("liq %.2f SOL", s.LiquidityProxySOL))
 	} else {
 		fragments = append(fragments, "thin liq")
 	}
@@ -780,6 +788,7 @@ func AssignPriorityLabels(rows []model.LiveSnapshot) {
 	for i := range rows {
 		rows[i].Layer0Reject = rows[i].Engine.Layer0Reject
 		rows[i].ExecutionURL = BuildExecutionURL(rows[i].Mint)
+		rows[i].SolscanURL = BuildSolscanURL(rows[i].Mint)
 		rows[i].DexscreenerURL = BuildDexscreenerURL(rows[i].Mint)
 		rows[i].WhyNow = BuildWhyNow(&rows[i])
 		rows[i].WhyNotHigher = BuildWhyNotHigher(&rows[i])
@@ -923,11 +932,17 @@ func bestPriorityMint(rows []model.LiveSnapshot) string {
 	if len(rows) == 0 {
 		return ""
 	}
-	best := 0
-	for i := 1; i < len(rows); i++ {
-		if priorityLess(rows[best], rows[i]) {
+	best := -1
+	for i := range rows {
+		if rows[i].SignalState == StateExpired {
+			continue
+		}
+		if best == -1 || priorityLess(rows[best], rows[i]) {
 			best = i
 		}
+	}
+	if best == -1 {
+		return ""
 	}
 	return rows[best].Mint
 }
@@ -945,7 +960,16 @@ func priorityLess(a model.LiveSnapshot, b model.LiveSnapshot) bool {
 	if a.EffectiveBuyers5m != b.EffectiveBuyers5m {
 		return a.EffectiveBuyers5m < b.EffectiveBuyers5m
 	}
-	return impactForPriority(a.EstimatedImpactPct) > impactForPriority(b.EstimatedImpactPct)
+	if impactForPriority(a.EstimatedImpactPct) != impactForPriority(b.EstimatedImpactPct) {
+		return impactForPriority(a.EstimatedImpactPct) > impactForPriority(b.EstimatedImpactPct)
+	}
+	if signalFreshnessRank(a.SignalState) != signalFreshnessRank(b.SignalState) {
+		return signalFreshnessRank(a.SignalState) < signalFreshnessRank(b.SignalState)
+	}
+	if !a.LastEventAt.Equal(b.LastEventAt) {
+		return a.LastEventAt.Before(b.LastEventAt)
+	}
+	return a.Mint > b.Mint
 }
 
 func clusteringPriorityRank(status string) int {
@@ -955,6 +979,17 @@ func clusteringPriorityRank(status string) int {
 	case "partial_fallback":
 		return 2
 	case "full_fallback":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func signalFreshnessRank(state string) int {
+	switch state {
+	case StateFresh:
+		return 2
+	case StateStale:
 		return 1
 	default:
 		return 0

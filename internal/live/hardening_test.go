@@ -319,6 +319,105 @@ func TestFreshness_DefaultEnv(t *testing.T) {
 	}
 }
 
+func TestPriorityLabels_ExpiredRowCannotRemainHeroWhenFresherRowsExist(t *testing.T) {
+	old := priorityRow("OLD", live.StateExpired, epoch.Add(-20*time.Minute))
+	old.ConfidenceScore = 100
+
+	fresh := priorityRow("FRESH", live.StateFresh, epoch.Add(-1*time.Minute))
+	fresh.ConfidenceScore = 80
+
+	rows := []model.LiveSnapshot{old, fresh}
+	live.AssignPriorityLabels(rows)
+
+	if rows[0].PriorityLabel == "best_on_tape" {
+		t.Fatalf("expired row was selected as hero: %+v", rows[0])
+	}
+	if rows[1].PriorityLabel != "best_on_tape" {
+		t.Fatalf("fresh row priority=%q, want best_on_tape", rows[1].PriorityLabel)
+	}
+}
+
+func TestPriorityLabels_NewerLastEventWinsAmongSimilarlyRankedRows(t *testing.T) {
+	older := priorityRow("OLDER", live.StateFresh, epoch.Add(-2*time.Minute))
+	newer := priorityRow("NEWER", live.StateFresh, epoch.Add(-30*time.Second))
+
+	rows := []model.LiveSnapshot{older, newer}
+	live.AssignPriorityLabels(rows)
+
+	if rows[0].PriorityLabel == "best_on_tape" {
+		t.Fatalf("older equal-ranked row was selected as hero")
+	}
+	if rows[1].PriorityLabel != "best_on_tape" {
+		t.Fatalf("newer equal-ranked row priority=%q, want best_on_tape", rows[1].PriorityLabel)
+	}
+}
+
+func TestPriorityLabels_ExpiredRowsRemainVisibleButNotHero(t *testing.T) {
+	expired := priorityRow("EXPIRED", live.StateExpired, epoch.Add(-20*time.Minute))
+	fresh := priorityRow("FRESH", live.StateFresh, epoch.Add(-1*time.Minute))
+
+	rows := []model.LiveSnapshot{expired, fresh}
+	live.AssignPriorityLabels(rows)
+
+	if len(rows) != 2 {
+		t.Fatalf("rows length=%d, want expired row retained in table payload", len(rows))
+	}
+	if rows[0].Mint != "EXPIRED" {
+		t.Fatalf("expired row removed or reordered unexpectedly: %+v", rows)
+	}
+	if rows[0].PriorityLabel == "best_on_tape" {
+		t.Fatalf("expired row remained hero")
+	}
+	if rows[1].PriorityLabel != "best_on_tape" {
+		t.Fatalf("fresh row priority=%q, want best_on_tape", rows[1].PriorityLabel)
+	}
+}
+
+func priorityRow(mint, signalState string, lastEventAt time.Time) model.LiveSnapshot {
+	return model.LiveSnapshot{
+		TokenSnapshot: model.TokenSnapshot{
+			Mint:         mint,
+			FirstSeenAt:  epoch.Add(-30 * time.Minute),
+			LastEventAt:  lastEventAt,
+			MarketCapSOL: 10,
+		},
+		Decision:              live.LabelWATCH,
+		SignalState:           signalState,
+		IsActionable:          signalState != live.StateExpired,
+		ConfidenceScore:       75,
+		ClusteringRowStatus:   live.ClusteringResolved,
+		AdversarialScore:      0.10,
+		EffectiveBuyers5m:     5,
+		EstimatedImpactPct:    4,
+		LiquidityProxySOL:     25,
+		ExecutionPenalty:      1,
+		FundingClusterRatio:   0,
+		MarketCapSol:          10,
+		Layer0Reject:          false,
+		ClusteredBuyerCount:   0,
+		EffectiveBuyers1m:     3,
+		ClusteringStatus:      live.ClusteringHealthy,
+		ClusteringBackend:     "static",
+		ActionabilityLabel:    "observe closely",
+		OperatorVerdict:       "watchable",
+		QualityTier:           "NEAR",
+		TriggerLine:           "5 eff/5m",
+		NoTradeReason:         "",
+		WhyNow:                "buyer flow",
+		WhyNotHigher:          "",
+		DominantBlocker:       "",
+		PriorityLabel:         "",
+		RelativeSetupLabel:    "",
+		TrustLabel:            "organic",
+		TrustReason:           "no major trust impairment detected",
+		AsymmetryLabel:        "closest to upgrade",
+		AsymmetryReason:       "this needs the fewest changes to become interesting",
+		OperatorFocus:         "",
+		ExecutionURL:          "",
+		HistoricalOutcomeBand: "",
+	}
+}
+
 // ============================================================
 // Module 6D — Warm-up / Confidence gate
 // ============================================================
