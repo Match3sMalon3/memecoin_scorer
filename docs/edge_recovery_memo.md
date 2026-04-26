@@ -87,7 +87,7 @@ Current filters not obviously part of the validated Dune thesis:
 - Posture modes (`pristine`, `defensive`, `no-trade`)
 - `QualityTier`, `TriggerLine`, `NoTradeReason`
 - 7-gate organic success engine: liquidity/MC, top-10 holder concentration, shared funder ratio, volume/MC, organic winners, holder growth, slippage ceiling
-- Layer 0 hard rejects for self-bundling and minimum executable liquidity
+- Layer 0 hard rejects for self-bundling and minimum observed liquidity proxy
 - Cluster backend health requirement for BUY/READY
 - Effective-buyer clustering from funder parents
 - Freshness expiration and token warm-up windows
@@ -133,7 +133,7 @@ Can defer:
 - Retuning thresholds.
 - Endpoint path changes.
 - Replacing Helius ingress.
-- True DEX pool depth.
+- True DEX reserve depth.
 - Dune SQL reconstruction, unless exact label parity becomes mandatory.
 
 Shadow mode has now been added as the first reconnection step. Each live row can expose a `shadow` result that either blocks scoring with explicit missing fields or, once mature validated inputs are complete, runs the existing `internal/scoring.Score` path without replacing live ranking.

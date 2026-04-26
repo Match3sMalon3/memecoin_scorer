@@ -126,7 +126,7 @@ Check the **reason** column for the specific gate that blocked or passed each la
 ### `execution_penalty` [0,1]
 - **Is:** `liquidity_proxy_sol / (trade_size_sol × liquidity_multiplier)`, capped at 1.0.
 - **Is not:** actual AMM slippage. No RPC depth query is made.
-- **Proxy limitation:** `liquidity_proxy_sol` = cumulative `TotalBuySOL + TotalSellSOL` since first seen. On a new token with 500 SOL of real pool depth but only 10 SOL of observed swaps, the proxy is 10 SOL and exec will be low — it will improve as more events arrive.
+- **Proxy limitation:** `liquidity_proxy_sol` = cumulative `TotalBuySOL + TotalSellSOL` since first seen. On a new token with 500 SOL of real reserve depth but only 10 SOL of observed swaps, the proxy is 10 SOL and exec will be low — it will improve as more events arrive.
 
 ### `estimated_impact_pct`
 - **Is:** `trade_size_sol / liquidity_proxy_sol × 100`, capped at 100%.
@@ -147,7 +147,7 @@ Check the **reason** column for the specific gate that blocked or passed each la
 
 ### `liquidity_proxy_sol`
 - **Is:** `TotalBuySOL + TotalSellSOL` accumulated since first event seen in this session.
-- **Is not:** true AMM pool depth.
+- **Is not:** true AMM reserve depth.
 - **Resets on restart:** in-memory state. After a restart the proxy starts at 0 and rises as events arrive. Signals for the first few minutes after restart will have low exec scores even for healthy tokens.
 
 ---
@@ -173,7 +173,7 @@ All thresholds are **unvalidated priors**. Retune after observing 100+ live sign
 
 ## 8. Known limitations before trusting larger capital
 
-1. **No true pool depth.** `liquidity_proxy_sol` understates real AMM depth, especially on new tokens. A BUY signal with `estimated_impact_pct = 2%` against a proxy of 50 SOL might actually be 20% impact against 5 SOL of real depth. Do not size positions based on the proxy alone.
+1. **No true reserve depth.** `liquidity_proxy_sol` is observed swap-flow evidence and can differ from real AMM reserves, especially on new tokens. Do not size positions based on the proxy alone.
 
 2. **State resets on restart.** The in-memory store has no persistence. After a crash or redeploy, all token state is lost. Signals return only as new events arrive. Expect a 5–15 minute warm-up before scores are reliable.
 

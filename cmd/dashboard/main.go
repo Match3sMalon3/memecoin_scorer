@@ -1081,12 +1081,14 @@ func wowCompactBlocker(reason string) string {
 		return "partial fallback"
 	case strings.Contains(lower, "full_fallback") || strings.Contains(lower, "full fallback"):
 		return "full fallback"
+	case strings.Contains(lower, "observed liq proxy"):
+		return "observed liq proxy"
 	case strings.Contains(lower, "thin liquidity"):
-		return "thin liquidity"
+		return "observed liq proxy"
 	case strings.Contains(lower, "liquidity"):
 		fields := strings.Fields(text)
 		if len(fields) >= 5 {
-			return fmt.Sprintf("liq %s < %s", fields[1], fields[4])
+			return fmt.Sprintf("observed liq proxy %s < %s", fields[1], fields[4])
 		}
 	case strings.HasPrefix(lower, "impact"):
 		fields := strings.Fields(text)
@@ -1149,13 +1151,13 @@ func wowTriggerLine(row map[string]any) string {
 	} else if status == "partial_fallback" {
 		cluster = "partial"
 	}
-	exec := "thin liq"
+	exec := "observed liq proxy absent"
 	if liq := floatFieldMap(row, "liquidity_proxy_sol"); engineLayer0RejectGo(row) && liq > 0 {
-		exec = fmt.Sprintf("liq %.2f SOL", liq)
+		exec = fmt.Sprintf("observed liq proxy %.2f SOL", liq)
 	} else if impact := floatFieldMap(row, "estimated_impact_pct"); impact > 0 {
 		exec = fmt.Sprintf("impact %.1f%%", impact)
 	} else if liq > 0 {
-		exec = fmt.Sprintf("liq %.2f SOL", liq)
+		exec = fmt.Sprintf("observed liq proxy %.2f SOL", liq)
 	}
 	return strings.Join([]string{flow, cluster, exec}, " • ")
 }

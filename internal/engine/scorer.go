@@ -69,7 +69,7 @@ type EngineConfig struct {
 
 	// Layer 0 thresholds
 	MaxLayer0ClusterRatio float64 // default 0.80 — near-total sybil → hard reject
-	MinExecLiqSOL         float64 // default 5.0  — minimum executable liquidity
+	MinExecLiqSOL         float64 // default 5.0  — minimum observed liquidity proxy
 }
 
 // DefaultEngineConfig returns conservative production defaults.
@@ -212,10 +212,10 @@ func layer0(snap model.TokenSnapshot, clusterRatio float64, cfg EngineConfig) (b
 	if clusterRatio > cfg.MaxLayer0ClusterRatio {
 		return true, fmt.Sprintf("self_bundled: cluster_ratio=%.2f > %.2f", clusterRatio, cfg.MaxLayer0ClusterRatio)
 	}
-	// Impossible execution: pool too thin to trade at any size.
+	// Impossible execution: observed liquidity proxy too thin to trade at any size.
 	liq := snap.LiquidityPoolSOL
 	if liq > 0 && liq < cfg.MinExecLiqSOL {
-		return true, fmt.Sprintf("impossible_execution: liquidity=%.2f SOL < %.2f SOL minimum", liq, cfg.MinExecLiqSOL)
+		return true, fmt.Sprintf("impossible_execution: observed_liq_proxy=%.2f SOL < %.2f SOL minimum", liq, cfg.MinExecLiqSOL)
 	}
 	return false, ""
 }

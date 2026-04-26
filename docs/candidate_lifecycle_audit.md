@@ -12,7 +12,7 @@ Before this change, lifecycle and trade actionability were conflated:
 - WATCH could be `fresh`, `stale`, or `expired` based on `LastEventAt`.
 - AVOID was always marked `expired`, regardless of token age or recent activity.
 
-This meant a 20-second-old token with weak execution or thin liquidity was operationally dead in the UI even though it was still inside the earliest proxy observation window.
+This meant a 20-second-old token with weak execution or weak observed liquidity-proxy evidence was operationally dead in the UI even though it was still inside the earliest proxy observation window.
 
 ## Current States
 

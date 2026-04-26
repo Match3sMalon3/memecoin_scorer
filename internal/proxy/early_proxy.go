@@ -124,6 +124,16 @@ func ScoreEarlyProxy(s model.LiveSnapshot) model.EarlyProxyScore {
 
 	score = clamp(score, 0, 100)
 	band := bandFor(score, risks)
+	if unreliableObservedLiquidityProxy(s) && s.LiquidityProxySOL < 5 {
+		if qualifiesForUnreliableLiquidityWatch(s) {
+			score = math.Max(score, 45)
+			band = "WATCH"
+			reasons = append(reasons, "real buyer flow despite unreliable liquidity proxy")
+		} else {
+			score = 0
+			band = "DEAD"
+		}
+	}
 
 	return model.EarlyProxyScore{
 		Eligible:        score >= earlyProxyThreshold,
@@ -190,8 +200,12 @@ func observedRiskFlags(s model.LiveSnapshot) []string {
 	} else if s.Top10HolderPct >= 0.85 {
 		risks = append(risks, "high top10 concentration")
 	}
-	if s.LiquidityProxySOL > 0 && s.LiquidityProxySOL < 5 {
-		risks = append(risks, "very thin liquidity")
+	if s.LiquidityProxySOL < 5 {
+		if unreliableObservedLiquidityProxy(s) {
+			risks = append(risks, "observed liq proxy below 5 SOL")
+		} else if s.LiquidityProxySOL > 0 {
+			risks = append(risks, "very thin liquidity")
+		}
 	}
 	if s.EstimatedImpactPct > 25 {
 		risks = append(risks, "high estimated impact")
@@ -218,7 +232,7 @@ func riskPenalty(s model.LiveSnapshot) float64 {
 	if s.Top10HolderPct >= 0.85 {
 		penalty += 10
 	}
-	if s.LiquidityProxySOL > 0 && s.LiquidityProxySOL < 5 {
+	if s.LiquidityProxySOL > 0 && s.LiquidityProxySOL < 5 && !unreliableObservedLiquidityProxy(s) {
 		penalty += 12
 	}
 	if s.EstimatedImpactPct > 25 {
@@ -241,9 +255,59 @@ func hardRugVeto(s model.LiveSnapshot) bool {
 	}
 	if s.Engine.Layer0Reject {
 		reason := strings.ToLower(s.Engine.Layer0Reason)
-		return strings.Contains(reason, "self-bundl") || strings.Contains(reason, "impossible_execution")
+		if strings.Contains(reason, "self-bundl") || strings.Contains(reason, "hard rug") {
+			return true
+		}
+		if strings.Contains(reason, "impossible_execution") {
+			return !unreliableObservedLiquidityProxy(s)
+		}
 	}
 	return false
+}
+
+func qualifiesForUnreliableLiquidityWatch(s model.LiveSnapshot) bool {
+	if !unreliableObservedLiquidityProxy(s) || s.LiquidityProxySOL >= 5 {
+		return false
+	}
+	if !hasRealBuyerFlow(s) {
+		return false
+	}
+	if s.Top10HolderPct >= 0.95 {
+		return false
+	}
+	if s.ClusteringRowStatus == "full_fallback" {
+		return false
+	}
+	if terminalRugSignal(s) {
+		return false
+	}
+	if highImpactWithoutCompensatingEvidence(s) {
+		return false
+	}
+	return true
+}
+
+func unreliableObservedLiquidityProxy(s model.LiveSnapshot) bool {
+	return strings.EqualFold(s.LiquidityEvidenceSource, "observed_swaps_proxy") && !s.LiquidityProxyReliable
+}
+
+func hasRealBuyerFlow(s model.LiveSnapshot) bool {
+	return s.BuyersLast1m > 0 || s.BuyersLast5m > 1
+}
+
+func terminalRugSignal(s model.LiveSnapshot) bool {
+	if !s.Engine.Layer0Reject {
+		return false
+	}
+	reason := strings.ToLower(s.Engine.Layer0Reason)
+	return strings.Contains(reason, "self-bundl") || strings.Contains(reason, "hard rug")
+}
+
+func highImpactWithoutCompensatingEvidence(s model.LiveSnapshot) bool {
+	if s.EstimatedImpactPct < 50 {
+		return false
+	}
+	return s.EffectiveBuyers5m < 5 && s.BuyersLast5m < 5 && s.BuySolLast1m <= 0
 }
 
 func bandFor(score float64, risks []string) string {

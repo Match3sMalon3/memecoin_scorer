@@ -34,6 +34,10 @@ const (
 	StateExpired = "expired"
 )
 
+const (
+	LiquidityEvidenceObservedSwapsProxy = "observed_swaps_proxy"
+)
+
 // Clustering status strings exposed in Decision.ClusteringStatus.
 const (
 	ClusteringHealthy  = "healthy"
@@ -48,7 +52,7 @@ const (
 type LiveConfig struct {
 	// Execution / liquidity
 	TradeSizeSOL        float64 // intended position size in SOL (default 1.0)
-	LiquidityMultiplier float64 // pool depth must be >= TradeSizeSOL * LiquidityMultiplier (default 20)
+	LiquidityMultiplier float64 // observed liquidity proxy must be >= TradeSizeSOL * LiquidityMultiplier (default 20)
 
 	// BUY gates — all must pass
 	MinBuyers1mBUY     int     // minimum effective buyers in last 1m (default 3)
@@ -147,13 +151,16 @@ func DefaultLiveConfig() LiveConfig {
 
 // Decision is the output of Classify for a single token snapshot.
 type Decision struct {
-	Label              string   `json:"label"`
-	Reasons            []string `json:"reasons"`
-	ExecutionPenalty   float64  `json:"execution_penalty"`
-	LiquidityProxySOL  float64  `json:"liquidity_proxy_sol"`
-	AdversarialScore   float64  `json:"adversarial_score"`
-	TradeSizeSOL       float64  `json:"trade_size_sol"`
-	EstimatedImpactPct float64  `json:"estimated_impact_pct"`
+	Label                       string   `json:"label"`
+	Reasons                     []string `json:"reasons"`
+	ExecutionPenalty            float64  `json:"execution_penalty"`
+	LiquidityProxySOL           float64  `json:"liquidity_proxy_sol"`
+	LiquidityEvidenceSource     string   `json:"liquidity_evidence_source"`
+	LiquidityEvidenceAgeSeconds float64  `json:"liquidity_evidence_age_seconds"`
+	LiquidityProxyReliable      bool     `json:"liquidity_proxy_reliable"`
+	AdversarialScore            float64  `json:"adversarial_score"`
+	TradeSizeSOL                float64  `json:"trade_size_sol"`
+	EstimatedImpactPct          float64  `json:"estimated_impact_pct"`
 
 	// --- Module 6B: Effective buyer clustering ---
 	EffectiveBuyers1m   int     `json:"effective_buyers_1m"`
@@ -245,24 +252,27 @@ func ClassifyAt(snap model.TokenSnapshot, cfg LiveConfig, now time.Time) Decisio
 	engDec := engine.EvaluateGates(snap, clust1m.FundingClusterRatio, cfg.EngineConfig)
 
 	base := Decision{
-		LiquidityProxySOL:         liqProxy,
-		ExecutionPenalty:          execPenalty,
-		AdversarialScore:          advScore,
-		TradeSizeSOL:              cfg.TradeSizeSOL,
-		EstimatedImpactPct:        impactPct,
-		EffectiveBuyers1m:         effBuyers1m,
-		EffectiveBuyers5m:         effBuyers5m,
-		ClusteredBuyerCount:       clust1m.ClusteredBuyerCount,
-		FundingClusterRatio:       clust1m.FundingClusterRatio,
-		ClusteringStatus:          clusteringStatus,
-		ClusteringBackend:         clusteringBackend,
-		ClusterCompressionRatio1m: comp1m,
-		ClusterCompressionRatio5m: comp5m,
-		ClusteringRowStatus:       clusteringRowStatus(clust1m, snap.BuyersLast1m),
-		ClusteringTimeouts:        clust1m.ResolverTimeoutCount,
-		ClusteringFallbacks:       clust1m.ResolverFallbackCount,
-		WarmingUp:                 warmingUp,
-		Engine:                    engDec,
+		LiquidityProxySOL:           liqProxy,
+		LiquidityEvidenceSource:     LiquidityEvidenceObservedSwapsProxy,
+		LiquidityEvidenceAgeSeconds: liquidityEvidenceAgeSeconds(snap, now),
+		LiquidityProxyReliable:      false,
+		ExecutionPenalty:            execPenalty,
+		AdversarialScore:            advScore,
+		TradeSizeSOL:                cfg.TradeSizeSOL,
+		EstimatedImpactPct:          impactPct,
+		EffectiveBuyers1m:           effBuyers1m,
+		EffectiveBuyers5m:           effBuyers5m,
+		ClusteredBuyerCount:         clust1m.ClusteredBuyerCount,
+		FundingClusterRatio:         clust1m.FundingClusterRatio,
+		ClusteringStatus:            clusteringStatus,
+		ClusteringBackend:           clusteringBackend,
+		ClusterCompressionRatio1m:   comp1m,
+		ClusterCompressionRatio5m:   comp5m,
+		ClusteringRowStatus:         clusteringRowStatus(clust1m, snap.BuyersLast1m),
+		ClusteringTimeouts:          clust1m.ResolverTimeoutCount,
+		ClusteringFallbacks:         clust1m.ResolverFallbackCount,
+		WarmingUp:                   warmingUp,
+		Engine:                      engDec,
 	}
 
 	// Hard AVOID: execution quality too low
@@ -379,19 +389,22 @@ func finalize(d Decision, snap model.TokenSnapshot, cfg LiveConfig, now time.Tim
 		d.ConfidenceScore = float64(d.Engine.ScoreCap)
 	}
 	liveRow := &model.LiveSnapshot{
-		TokenSnapshot:             snap,
-		EffectiveBuyers1m:         d.EffectiveBuyers1m,
-		EffectiveBuyers5m:         d.EffectiveBuyers5m,
-		LiquidityProxySOL:         d.LiquidityProxySOL,
-		ClusteringRowStatus:       d.ClusteringRowStatus,
-		ClusterCompressionRatio5m: d.ClusterCompressionRatio5m,
-		AdversarialScore:          d.AdversarialScore,
-		EstimatedImpactPct:        d.EstimatedImpactPct,
-		Decision:                  d.Label,
-		LastPriceSol:              snap.LastPriceSOL,
-		MarketCapSol:              snap.MarketCapSOL,
-		Layer0Reject:              d.Engine.Layer0Reject,
-		Engine:                    d.Engine,
+		TokenSnapshot:               snap,
+		EffectiveBuyers1m:           d.EffectiveBuyers1m,
+		EffectiveBuyers5m:           d.EffectiveBuyers5m,
+		LiquidityProxySOL:           d.LiquidityProxySOL,
+		LiquidityEvidenceSource:     d.LiquidityEvidenceSource,
+		LiquidityEvidenceAgeSeconds: d.LiquidityEvidenceAgeSeconds,
+		LiquidityProxyReliable:      d.LiquidityProxyReliable,
+		ClusteringRowStatus:         d.ClusteringRowStatus,
+		ClusterCompressionRatio5m:   d.ClusterCompressionRatio5m,
+		AdversarialScore:            d.AdversarialScore,
+		EstimatedImpactPct:          d.EstimatedImpactPct,
+		Decision:                    d.Label,
+		LastPriceSol:                snap.LastPriceSOL,
+		MarketCapSol:                snap.MarketCapSOL,
+		Layer0Reject:                d.Engine.Layer0Reject,
+		Engine:                      d.Engine,
 	}
 	d.WhyNow = BuildWhyNow(liveRow)
 	d.WhyNotHigher = BuildWhyNotHigher(liveRow)
@@ -544,13 +557,13 @@ func BuildTriggerLine(s *model.LiveSnapshot) string {
 	}
 
 	if s.Engine.Layer0Reject && s.LiquidityProxySOL > 0 {
-		fragments = append(fragments, fmt.Sprintf("liq %.2f SOL", s.LiquidityProxySOL))
+		fragments = append(fragments, observedLiquidityProxyLabel(s.LiquidityProxySOL))
 	} else if s.EstimatedImpactPct > 0 {
 		fragments = append(fragments, fmt.Sprintf("impact %.1f%%", s.EstimatedImpactPct))
 	} else if s.LiquidityProxySOL > 0 {
-		fragments = append(fragments, fmt.Sprintf("liq %.2f SOL", s.LiquidityProxySOL))
+		fragments = append(fragments, observedLiquidityProxyLabel(s.LiquidityProxySOL))
 	} else {
-		fragments = append(fragments, "thin liq")
+		fragments = append(fragments, "observed liq proxy absent")
 	}
 
 	if len(fragments) > 3 {
@@ -559,9 +572,13 @@ func BuildTriggerLine(s *model.LiveSnapshot) string {
 	return strings.Join(fragments, " • ")
 }
 
+func observedLiquidityProxyLabel(sol float64) string {
+	return fmt.Sprintf("observed liq proxy %.2f SOL", sol)
+}
+
 func BuildNoTradeReason(s *model.LiveSnapshot) string {
 	if s.Engine.Layer0Reject && s.LiquidityProxySOL > 0 && s.LiquidityProxySOL < 5 {
-		return fmt.Sprintf("liquidity %.2f SOL < 5 SOL minimum", s.LiquidityProxySOL)
+		return fmt.Sprintf("observed liq proxy %.2f < 5", s.LiquidityProxySOL)
 	}
 	if s.EstimatedImpactPct > 15 {
 		return fmt.Sprintf("impact %.1f%% > 15%% max", s.EstimatedImpactPct)
@@ -624,13 +641,13 @@ func BuildDominantBlocker(s *model.LiveSnapshot) string {
 		layer0Reason = strings.ToLower(s.Engine.Layer0Reason)
 	}
 	if layer0Reject && strings.Contains(layer0Reason, "impossible_execution") {
-		return "impossible execution • thin liquidity"
+		return "impossible execution • observed liq proxy below 5"
 	}
 	if s.ClusteringRowStatus == "full_fallback" {
-		return "full fallback • thin liquidity"
+		return "full fallback • observed liq proxy weak"
 	}
 	if s.ClusteringRowStatus == "partial_fallback" {
-		return "partial fallback • thin liquidity"
+		return "partial fallback • observed liq proxy weak"
 	}
 	if s.MarketCapSol == 0 {
 		return "no holder proxy • slippage ceiling"
@@ -639,7 +656,7 @@ func BuildDominantBlocker(s *model.LiveSnapshot) string {
 		return "concentration • suspicious vol/mc"
 	}
 	if s.EstimatedImpactPct > 15 {
-		return "thin liquidity • slippage ceiling"
+		return "observed liq proxy weak • slippage ceiling"
 	}
 	if s.EffectiveBuyers5m < 5 {
 		return "too few effective buyers"
@@ -672,7 +689,7 @@ func BuildOperatorVerdict(s *model.LiveSnapshot) string {
 
 func BuildHistoricalAnalogueSummary(s *model.LiveSnapshot) string {
 	if s.Engine.Layer0Reject || s.LiquidityProxySOL < 5 {
-		return "Historically resembles failed early-interest names: attention appears before executable liquidity."
+		return "Historically resembles failed early-interest names: attention appears before observed liquidity evidence is strong enough."
 	}
 	if s.MarketCapSol == 0 {
 		return "Historically resembles incomplete structure: flow appears, but holder-backed market-cap formation is not yet visible."
@@ -719,7 +736,7 @@ func BuildUpgradeTriggers(s *model.LiveSnapshot) string {
 	var out []string
 
 	if s.LiquidityProxySOL < 5 {
-		out = append(out, "liquidity must clear 5 SOL minimum")
+		out = append(out, "observed liq proxy must clear 5 SOL minimum")
 	}
 	if s.EstimatedImpactPct > 15 || s.EstimatedImpactPct == 0 {
 		out = append(out, "impact must compress to 15% or lower")
@@ -1072,6 +1089,17 @@ func estimatedImpact(tradeSOL, liqSOL float64) float64 {
 		return 100
 	}
 	return pct
+}
+
+func liquidityEvidenceAgeSeconds(snap model.TokenSnapshot, now time.Time) float64 {
+	if snap.LastEventAt.IsZero() {
+		return 0
+	}
+	age := now.Sub(snap.LastEventAt).Seconds()
+	if age < 0 {
+		return 0
+	}
+	return age
 }
 
 func adversarialScore(snap model.TokenSnapshot) float64 {

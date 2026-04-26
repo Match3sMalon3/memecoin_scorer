@@ -429,6 +429,7 @@ func TestSnapshots_FieldsPresent(t *testing.T) {
 	// ScoredSnapshot fields — including marketability fields
 	for _, field := range []string{
 		"decision", "reasons", "execution_penalty", "liquidity_proxy_sol",
+		"liquidity_evidence_source", "liquidity_evidence_age_seconds", "liquidity_proxy_reliable",
 		"adversarial_score", "trade_size_sol", "estimated_impact_pct",
 		"early_proxy",
 	} {
@@ -459,6 +460,12 @@ func TestSnapshots_FieldsPresent(t *testing.T) {
 	// execution_penalty must be in [0,1]
 	if ep, ok := s["execution_penalty"].(float64); !ok || ep < 0 || ep > 1 {
 		t.Errorf("execution_penalty = %v, want float in [0,1]", s["execution_penalty"])
+	}
+	if src, ok := s["liquidity_evidence_source"].(string); !ok || src != live.LiquidityEvidenceObservedSwapsProxy {
+		t.Errorf("liquidity_evidence_source = %v, want %q", s["liquidity_evidence_source"], live.LiquidityEvidenceObservedSwapsProxy)
+	}
+	if reliable, ok := s["liquidity_proxy_reliable"].(bool); !ok || reliable {
+		t.Errorf("liquidity_proxy_reliable = %v, want false for observed swaps proxy", s["liquidity_proxy_reliable"])
 	}
 }
 

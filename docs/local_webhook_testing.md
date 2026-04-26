@@ -182,8 +182,8 @@ curl -s "http://localhost:8080/api/snapshots?min_buyers=1&since_minutes=60&limit
 
 Each entry includes:
 - `decision` — BUY / READY / WATCH / AVOID
-- `execution_penalty` — [0,1]; low = thin liquidity relative to trade size
-- `estimated_impact_pct` — your trade as % of proxy pool depth
+- `execution_penalty` — [0,1]; low = weak observed liquidity proxy relative to trade size
+- `estimated_impact_pct` — your trade as % of the observed liquidity proxy
 - `adversarial_score` — [0,1]; 0=clean, 1=maximally suspicious
 - `reasons` — why the decision was made
 

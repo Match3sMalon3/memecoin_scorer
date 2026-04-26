@@ -180,7 +180,8 @@ type TokenSnapshot struct {
 	// --- 7-gate fields (populated by the state store from swap event data) ---
 	// Zero values signal "data not yet available" — the engine skips the relevant gate.
 
-	// LiquidityPoolSOL is the estimated pool depth in SOL (TotalBuySOL + TotalSellSOL proxy).
+	// LiquidityPoolSOL is currently an observed swap-flow proxy in SOL
+	// (TotalBuySOL + TotalSellSOL), not executable AMM reserve depth.
 	// Used by Gate 1 (Liquidity/MC) and Gate 7 (slippage ceiling). Zero = not yet computed.
 	LiquidityPoolSOL float64 `json:"liquidity_pool_sol"`
 
@@ -241,10 +242,17 @@ type LiveSnapshot struct {
 	// ExecutionPenalty is the [0,1] execution quality score computed from the
 	// liquidity proxy and intended trade size.
 	ExecutionPenalty float64 `json:"execution_penalty"`
-	// LiquidityProxySOL is TotalBuySOL + TotalSellSOL, used as a rough depth proxy.
-	// This is NOT true AMM pool depth — it is cumulative observed volume and
-	// understates real depth, especially on newly-launched tokens.
+	// LiquidityProxySOL is TotalBuySOL + TotalSellSOL, used as an observed swap-flow proxy.
+	// This is NOT true AMM reserve depth and must not be described as verified reserves.
 	LiquidityProxySOL float64 `json:"liquidity_proxy_sol"`
+	// LiquidityEvidenceSource names the evidence source behind LiquidityProxySOL.
+	// Current live store support is "observed_swaps_proxy".
+	LiquidityEvidenceSource string `json:"liquidity_evidence_source"`
+	// LiquidityEvidenceAgeSeconds is seconds since the latest event backing the proxy.
+	LiquidityEvidenceAgeSeconds float64 `json:"liquidity_evidence_age_seconds"`
+	// LiquidityProxyReliable is false when the value is only an observed flow proxy
+	// rather than direct pool reserve depth.
+	LiquidityProxyReliable bool `json:"liquidity_proxy_reliable"`
 	// AdversarialScore is a [0,1] suspicion score combining concentration,
 	// wallet diversity, and repeat-buyer signals. 0=clean, 1=maximally suspicious.
 	AdversarialScore float64 `json:"adversarial_score"`

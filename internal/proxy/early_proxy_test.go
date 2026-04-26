@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"memecoin_scorer/internal/live"
 	"memecoin_scorer/internal/model"
 	"memecoin_scorer/internal/proxy"
 )
@@ -112,6 +113,58 @@ func TestScoreEarlyProxyHardVetoExtremeConcentration(t *testing.T) {
 	}
 }
 
+func TestScoreEarlyProxyUnreliableThinProxyWithCleanFlowMovesToWatch(t *testing.T) {
+	row := unreliableThinProxyRow()
+
+	got := proxy.ScoreEarlyProxy(row)
+	if got.Band != "WATCH" {
+		t.Fatalf("band=%q score=%.2f reasons=%v risks=%v, want WATCH", got.Band, got.Score, got.Reasons, got.RiskFlags)
+	}
+	if !contains(got.Reasons, "real buyer flow despite unreliable liquidity proxy") {
+		t.Fatalf("reasons=%v, want unreliable-liquidity reclassification reason", got.Reasons)
+	}
+	if !contains(got.RiskFlags, "observed liq proxy below 5") {
+		t.Fatalf("risk_flags=%v, want observed proxy liquidity risk", got.RiskFlags)
+	}
+}
+
+func TestScoreEarlyProxyUnreliableThinProxyNoFlowRemainsDead(t *testing.T) {
+	row := unreliableThinProxyRow()
+	row.BuyersLast1m = 0
+	row.BuyersLast5m = 0
+	row.BuySolLast1m = 0
+	row.EffectiveBuyers1m = 0
+	row.EffectiveBuyers5m = 0
+
+	got := proxy.ScoreEarlyProxy(row)
+	if got.Band != "DEAD" {
+		t.Fatalf("band=%q score=%.2f, want DEAD for no flow", got.Band, got.Score)
+	}
+	if !contains(got.RiskFlags, "no real flow") {
+		t.Fatalf("risk_flags=%v, want no real flow", got.RiskFlags)
+	}
+}
+
+func TestScoreEarlyProxyUnreliableThinProxyExtremeTop10RemainsDead(t *testing.T) {
+	row := unreliableThinProxyRow()
+	row.Top10HolderPct = 0.95
+
+	got := proxy.ScoreEarlyProxy(row)
+	if got.Band != "DEAD" || got.Score != 0 {
+		t.Fatalf("band=%q score=%.2f, want DEAD score 0 for extreme top10", got.Band, got.Score)
+	}
+}
+
+func TestScoreEarlyProxyUnreliableThinProxyFullFallbackRemainsDead(t *testing.T) {
+	row := unreliableThinProxyRow()
+	row.ClusteringRowStatus = "full_fallback"
+
+	got := proxy.ScoreEarlyProxy(row)
+	if got.Band != "DEAD" {
+		t.Fatalf("band=%q score=%.2f risks=%v, want DEAD for full fallback", got.Band, got.Score, got.RiskFlags)
+	}
+}
+
 func TestScoreEarlyProxyAppliesEvidenceCoverageDiscount(t *testing.T) {
 	row := model.LiveSnapshot{
 		TokenSnapshot: model.TokenSnapshot{
@@ -188,6 +241,32 @@ func strongRow() model.LiveSnapshot {
 		FundingClusterRatio: 0.08,
 		AdversarialScore:    0.18,
 		ExecutionPenalty:    0.8,
+	}
+}
+
+func unreliableThinProxyRow() model.LiveSnapshot {
+	return model.LiveSnapshot{
+		TokenSnapshot: model.TokenSnapshot{
+			BuyersLast1m:      2,
+			BuyersLast5m:      4,
+			BuySolLast1m:      0.8,
+			SellSolLast1m:     0.1,
+			BuyerAcceleration: 1.1,
+			HolderCount:       12,
+			MarketCapSOL:      20,
+			Top10HolderPct:    0.40,
+		},
+		Decision:                "AVOID",
+		EffectiveBuyers1m:       2,
+		EffectiveBuyers5m:       4,
+		LiquidityProxySOL:       1.5,
+		LiquidityEvidenceSource: live.LiquidityEvidenceObservedSwapsProxy,
+		LiquidityProxyReliable:  false,
+		EstimatedImpactPct:      40,
+		ClusteringRowStatus:     "resolved",
+		FundingClusterRatio:     0.05,
+		AdversarialScore:        0.10,
+		ExecutionPenalty:        0.08,
 	}
 }
 

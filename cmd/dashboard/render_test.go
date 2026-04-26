@@ -8,36 +8,39 @@ import (
 
 func sampleLiveRow() map[string]any {
 	return map[string]any{
-		"mint":                  "RENDERMINT123456789",
-		"decision":              "AVOID",
-		"operator_verdict":      "structurally broken",
-		"dominant_blocker":      "impossible execution • thin liquidity",
-		"why_not_higher":        "impossible execution • thin liquidity",
-		"why_now":               "5 eff buyers /1m • 5 eff buyers /5m • clean clustering",
-		"execution_url":         "https://gmgn.ai/sol/token/RENDERMINT123456789",
-		"solscan_url":           "https://solscan.io/token/RENDERMINT123456789",
-		"early_proxy":           map[string]any{"score": 74.0, "threshold": 62.0, "band": "CANDIDATE", "reasons": []any{"early effective buyer depth", "positive buy pressure"}, "risk_flags": []any{"very thin liquidity"}, "missing_fields": []any{"market_cap_sol"}, "evidence_version": "test"},
-		"signal_state":          "expired",
-		"confidence_score":      66.0,
-		"buyers_last1m":         5.0,
-		"effective_buyers_1m":   5.0,
-		"buy_sol_last_1m":       1.2,
-		"sell_sol_last_1m":      0.4,
-		"buyer_acceleration":    1.0,
-		"execution_penalty":     0.4,
-		"adversarial_score":     0.2,
-		"estimated_impact_pct":  12.0,
-		"age_seconds":           120.0,
-		"funding_cluster_ratio": 0.0,
-		"clustering_row_status": "resolved",
-		"clustering_timeouts":   0.0,
-		"clustering_fallbacks":  0.0,
-		"market_cap_sol":        10.0,
-		"last_price_sol":        0.000001,
-		"market_cap_reason":     "",
-		"is_actionable":         false,
-		"engine":                map[string]any{"layer0_reject": true, "layer0_reason": "impossible_execution: liquidity=1.00 SOL < 5.00 SOL minimum", "gates_pass_count": 0.0, "gates": []any{}},
-		"holder_count":          5.0,
+		"mint":                           "RENDERMINT123456789",
+		"decision":                       "AVOID",
+		"operator_verdict":               "structurally broken",
+		"dominant_blocker":               "impossible execution • observed liq proxy below 5",
+		"why_not_higher":                 "impossible execution • observed liq proxy below 5",
+		"why_now":                        "5 eff buyers /1m • 5 eff buyers /5m • clean clustering",
+		"execution_url":                  "https://gmgn.ai/sol/token/RENDERMINT123456789",
+		"solscan_url":                    "https://solscan.io/token/RENDERMINT123456789",
+		"early_proxy":                    map[string]any{"score": 74.0, "threshold": 62.0, "band": "CANDIDATE", "reasons": []any{"early effective buyer depth", "positive buy pressure"}, "risk_flags": []any{"observed liq proxy below 5 SOL"}, "missing_fields": []any{"market_cap_sol"}, "evidence_version": "test"},
+		"signal_state":                   "expired",
+		"confidence_score":               66.0,
+		"buyers_last1m":                  5.0,
+		"effective_buyers_1m":            5.0,
+		"buy_sol_last_1m":                1.2,
+		"sell_sol_last_1m":               0.4,
+		"buyer_acceleration":             1.0,
+		"execution_penalty":              0.4,
+		"adversarial_score":              0.2,
+		"estimated_impact_pct":           12.0,
+		"age_seconds":                    120.0,
+		"funding_cluster_ratio":          0.0,
+		"clustering_row_status":          "resolved",
+		"clustering_timeouts":            0.0,
+		"clustering_fallbacks":           0.0,
+		"market_cap_sol":                 10.0,
+		"last_price_sol":                 0.000001,
+		"market_cap_reason":              "",
+		"is_actionable":                  false,
+		"liquidity_evidence_source":      "observed_swaps_proxy",
+		"liquidity_proxy_reliable":       false,
+		"liquidity_evidence_age_seconds": 3.0,
+		"engine":                         map[string]any{"layer0_reject": true, "layer0_reason": "impossible_execution: observed_liq_proxy=1.00 SOL < 5.00 SOL minimum", "gates_pass_count": 0.0, "gates": []any{}},
+		"holder_count":                   5.0,
 	}
 }
 
@@ -46,7 +49,7 @@ func TestRenderInitialRows_VisibleOperatorCells(t *testing.T) {
 	if !strings.Contains(html, `<td class="verdict-label"><strong>structurally broken</strong></td>`) {
 		t.Fatalf("visible verdict cell missing: %s", html)
 	}
-	if !strings.Contains(html, `<td class="blocker-cell">impossible execution • thin liquidity</td>`) {
+	if !strings.Contains(html, `<td class="blocker-cell">impossible execution • observed liq proxy below 5</td>`) {
 		t.Fatalf("visible blocker cell missing: %s", html)
 	}
 	if !strings.Contains(html, `<td class="why-now-cell">5 eff buyers /1m • 5 eff buyers /5m • clean clustering</td>`) {
@@ -214,7 +217,7 @@ func TestChooseBestSetupGo_CoolingCanWinWhenNoFormingOrActiveNonDead(t *testing.
 func TestRenderIndexHTML_AllFormingDeadRowsShowNoRunnerCandidate(t *testing.T) {
 	row := sampleLiveRow()
 	row["signal_state"] = "forming"
-	row["early_proxy"] = map[string]any{"score": 0.0, "threshold": 62.0, "band": "DEAD", "risk_flags": []any{"very thin liquidity"}}
+	row["early_proxy"] = map[string]any{"score": 0.0, "threshold": 62.0, "band": "DEAD", "risk_flags": []any{"observed liq proxy below 5 SOL"}}
 	app := &App{
 		cfg:              dashConfig{liveMode: true},
 		cachedLiveRows:   []map[string]any{row},
@@ -233,6 +236,26 @@ func TestRenderIndexHTML_AllFormingDeadRowsShowNoRunnerCandidate(t *testing.T) {
 		if !strings.Contains(html, want) {
 			t.Fatalf("all-DEAD markup %q missing: %s", want, html)
 		}
+	}
+}
+
+func TestRenderIndexHTML_UsesObservedLiquidityProxyCopy(t *testing.T) {
+	row := sampleLiveRow()
+	row["signal_state"] = "forming"
+	row["liquidity_proxy_sol"] = 1.0
+	row["dominant_blocker"] = "observed liq proxy 1.00 < 5"
+	app := &App{
+		cfg:              dashConfig{liveMode: true},
+		cachedLiveRows:   []map[string]any{row},
+		cachedLiveRowsAt: time.Now(),
+	}
+
+	html := app.renderIndexHTML()
+	if strings.Contains(html, "liq 1.00 < 5") {
+		t.Fatalf("old liquidity blocker text rendered: %s", html)
+	}
+	if !strings.Contains(html, "observed liq proxy") {
+		t.Fatalf("observed liquidity proxy text missing: %s", html)
 	}
 }
 

@@ -330,7 +330,7 @@ cloudflared tunnel --url http://localhost:8080 >> logs/cloudflared.log 2>&1 &
 
 **All signals show AVOID**
 - Check impact ceiling: `MAX_ESTIMATED_IMPACT_PCT` (default 15%). Very new low-volume tokens may trip this.
-- Check exec floor: `MIN_EXEC_QUALITY_AVOID` (default 0.1). Extremely thin liquidity will be gated.
+- Check exec floor: `MIN_EXEC_QUALITY_AVOID` (default 0.1). Extremely weak observed liquidity proxy evidence will be gated.
 
 **BUY signals not appearing**
 - Token may be in warm-up (`warming_up=true`). Wait for `age > MIN_TOKEN_AGE_SECONDS_FOR_BUY`.
@@ -349,7 +349,7 @@ cloudflared tunnel --url http://localhost:8080 >> logs/cloudflared.log 2>&1 &
 
 ## Known limitations
 
-1. **Liquidity proxy is cumulative volume, not true AMM depth.** `liq_proxy_sol = TotalBuySOL + TotalSellSOL` understates real pool depth. Replace with a real Solana RPC depth query for production accuracy.
+1. **Liquidity proxy is cumulative volume, not true AMM reserve depth.** `liq_proxy_sol = TotalBuySOL + TotalSellSOL` is observed swap-flow evidence. Replace with a real Solana RPC reserve-depth query for production accuracy.
 
 2. **FunderResolver is NullResolver by default.** Effective buyer clustering requires an external funder-parent database. Without it, `effective_buyers == raw_buyers` and the clustering ratio is always 0.
 
