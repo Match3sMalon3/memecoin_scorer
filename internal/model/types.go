@@ -14,6 +14,19 @@ type SwapEvent struct {
 	SOLAmount   float64 // in SOL (lamports divided by 1e9)
 	TokenAmount float64 // raw token units as reported by the DEX
 	ProgramID   string  // DEX program address or Helius source name
+
+	// PoolAccountAddr is the AMM pool account extracted from inner instructions,
+	// when the transaction's program is a known DEX (Raydium V4, Pump.fun).
+	// Empty string when the pool account cannot be determined from the webhook payload.
+	// See docs/real_liquidity_discovery_gap.md for the full extraction gap analysis.
+	PoolAccountAddr string
+
+	// RealPoolDepthSOL is the executable on-chain reserve depth in SOL.
+	// -1 = unavailable; the system falls back to the observed_swaps_proxy.
+	// >= 0 = verified depth from a pc_vault balance query (not yet implemented).
+	// This field is -1 in all current paths; it exists as the integration point
+	// for a future Solana RPC depth lookup routed through PoolAccountAddr.
+	RealPoolDepthSOL float64
 }
 
 // GateResult holds the pass/fail result for one of the 7 success gates.
@@ -180,10 +193,20 @@ type TokenSnapshot struct {
 	// --- 7-gate fields (populated by the state store from swap event data) ---
 	// Zero values signal "data not yet available" — the engine skips the relevant gate.
 
-	// LiquidityPoolSOL is currently an observed swap-flow proxy in SOL
-	// (TotalBuySOL + TotalSellSOL), not executable AMM reserve depth.
+	// LiquidityPoolSOL is the best available pool depth in SOL.
+	// When real depth is available (raydium_pc_vault) this is the WSOL reserve balance.
+	// Otherwise it is TotalBuySOL + TotalSellSOL (observed_swaps_proxy).
 	// Used by Gate 1 (Liquidity/MC) and Gate 7 (slippage ceiling). Zero = not yet computed.
 	LiquidityPoolSOL float64 `json:"liquidity_pool_sol"`
+
+	// LiquidityEvidenceSource names the backing source for LiquidityPoolSOL.
+	// "observed_swaps_proxy" — cumulative swap flow (unreliable proxy).
+	// "raydium_pc_vault"     — on-chain WSOL reserve via getTokenAccountBalance.
+	LiquidityEvidenceSource string `json:"liquidity_evidence_source,omitempty"`
+
+	// LiquidityProxyReliable is true only when LiquidityEvidenceSource is "raydium_pc_vault".
+	// false means LiquidityPoolSOL is an observed proxy and must not be described as verified depth.
+	LiquidityProxyReliable bool `json:"liquidity_proxy_reliable"`
 
 	// MarketCapSOL is the estimated market cap in SOL (lastPriceSOL × totalTokenSupply).
 	// Used by Gates 1 and 4. Zero = price not yet observed or supply unknown.

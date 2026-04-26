@@ -223,7 +223,20 @@ func Classify(snap model.TokenSnapshot, cfg LiveConfig) Decision {
 //  6. WATCH
 //  7. AVOID
 func ClassifyAt(snap model.TokenSnapshot, cfg LiveConfig, now time.Time) Decision {
-	liqProxy := snap.TotalBuySOL + snap.TotalSellSOL
+	// Use on-chain real depth when available; fall back to observed swap-flow proxy.
+	// LiquidityProxyReliable is set by the store when a Raydium pc_vault query has succeeded.
+	var liqProxy float64
+	var liqSource string
+	var liqReliable bool
+	if snap.LiquidityProxyReliable && snap.LiquidityPoolSOL > 0 {
+		liqProxy = snap.LiquidityPoolSOL
+		liqSource = snap.LiquidityEvidenceSource
+		liqReliable = true
+	} else {
+		liqProxy = snap.TotalBuySOL + snap.TotalSellSOL
+		liqSource = LiquidityEvidenceObservedSwapsProxy
+		liqReliable = false
+	}
 	execPenalty := features.ExecutionPenalty(cfg.TradeSizeSOL, liqProxy, cfg.LiquidityMultiplier)
 	advScore := adversarialScore(snap)
 	impactPct := estimatedImpact(cfg.TradeSizeSOL, liqProxy)
@@ -253,9 +266,9 @@ func ClassifyAt(snap model.TokenSnapshot, cfg LiveConfig, now time.Time) Decisio
 
 	base := Decision{
 		LiquidityProxySOL:           liqProxy,
-		LiquidityEvidenceSource:     LiquidityEvidenceObservedSwapsProxy,
+		LiquidityEvidenceSource:     liqSource,
 		LiquidityEvidenceAgeSeconds: liquidityEvidenceAgeSeconds(snap, now),
-		LiquidityProxyReliable:      false,
+		LiquidityProxyReliable:      liqReliable,
 		ExecutionPenalty:            execPenalty,
 		AdversarialScore:            advScore,
 		TradeSizeSOL:                cfg.TradeSizeSOL,

@@ -131,15 +131,17 @@ func toSwapEvent(tx *heliusTx) (model.SwapEvent, bool) {
 	}
 
 	return model.SwapEvent{
-		Signature:   tx.Signature,
-		Slot:        tx.Slot,
-		BlockTime:   time.Unix(tx.Timestamp, 0).UTC(),
-		TokenMint:   mint,
-		IsBuy:       isBuy,
-		WalletAddr:  tx.FeePayer,
-		SOLAmount:   sol,
-		TokenAmount: tokenAmount,
-		ProgramID:   programID,
+		Signature:        tx.Signature,
+		Slot:             tx.Slot,
+		BlockTime:        time.Unix(tx.Timestamp, 0).UTC(),
+		TokenMint:        mint,
+		IsBuy:            isBuy,
+		WalletAddr:       tx.FeePayer,
+		SOLAmount:        sol,
+		TokenAmount:      tokenAmount,
+		ProgramID:        programID,
+		PoolAccountAddr:  extractPoolAccount(tx),
+		RealPoolDepthSOL: -1, // pc_vault lookup not yet implemented; see docs/real_liquidity_discovery_gap.md
 	}, true
 }
 
@@ -160,6 +162,16 @@ func parseLamports(s string) (float64, error) {
 
 // --- Helius enhanced-transaction raw types ---
 
+// Known DEX program IDs used for pool account extraction.
+const (
+	// raydiumAMMV4 is the Raydium AMM V4 program. In its swap inner instructions
+	// accounts[0] is the AMM pool account (from which pc_vault can be derived via RPC).
+	raydiumAMMV4 = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
+	// pumpFun is the Pump.fun bonding-curve program. In its buy/sell inner instructions
+	// accounts[3] is the bonding-curve account (pool equivalent).
+	pumpFun = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+)
+
 type heliusTx struct {
 	Signature        string          `json:"signature"`
 	Slot             uint64          `json:"slot"`
@@ -171,6 +183,13 @@ type heliusTx struct {
 	Events           struct {
 		Swap *heliusSwap `json:"swap"`
 	} `json:"events"`
+	// Accounts is the ordered list of all account pubkeys involved in the transaction.
+	// Inner instruction account indices are offsets into this slice.
+	Accounts []string `json:"accounts"`
+	// InnerInstructions contains CPI (cross-program invocation) instruction data.
+	// Used for best-effort pool account extraction when the enhanced swap event
+	// does not directly expose the AMM pool address.
+	InnerInstructions []heliusInnerInstruction `json:"innerInstructions"`
 }
 
 // hasError returns true when transactionError is a non-null JSON value.
@@ -247,4 +266,52 @@ type heliusProg struct {
 	Account     string `json:"account"`
 	ProgramName string `json:"programName"`
 	Source      string `json:"source"`
+}
+
+type heliusInnerInstruction struct {
+	Index        int                  `json:"index"`
+	Instructions []heliusInstruction  `json:"instructions"`
+}
+
+// heliusInstruction represents one inner CPI instruction.
+// Accounts is a slice of integer indices into the parent heliusTx.Accounts slice.
+type heliusInstruction struct {
+	Accounts  []int  `json:"accounts"`
+	Data      string `json:"data"`
+	ProgramId string `json:"programId"`
+}
+
+// extractPoolAccount scans inner instructions for known DEX programs and returns
+// the pool account pubkey when one can be identified.
+//
+// Coverage:
+//   - Raydium AMM V4: pool account is at accounts[0] in the swap instruction.
+//   - Pump.fun:        bonding curve is at accounts[3] in the buy/sell instruction.
+//
+// Returns "" when no known DEX inner instruction is found or when the indexed
+// account is out of range. This is best-effort; pc_vault lookup (needed to get
+// actual reserve depth) requires a separate Solana RPC call.
+// See docs/real_liquidity_discovery_gap.md.
+func extractPoolAccount(tx *heliusTx) string {
+	for _, inner := range tx.InnerInstructions {
+		for _, instr := range inner.Instructions {
+			switch instr.ProgramId {
+			case raydiumAMMV4:
+				if len(instr.Accounts) > 0 {
+					idx := instr.Accounts[0]
+					if idx >= 0 && idx < len(tx.Accounts) {
+						return tx.Accounts[idx]
+					}
+				}
+			case pumpFun:
+				if len(instr.Accounts) > 3 {
+					idx := instr.Accounts[3]
+					if idx >= 0 && idx < len(tx.Accounts) {
+						return tx.Accounts[idx]
+					}
+				}
+			}
+		}
+	}
+	return ""
 }

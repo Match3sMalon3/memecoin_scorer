@@ -19,6 +19,7 @@ import (
 	"memecoin_scorer/internal/live"
 	"memecoin_scorer/internal/model"
 	"memecoin_scorer/internal/proxy"
+	"memecoin_scorer/internal/rpc"
 	"memecoin_scorer/internal/shadow"
 	"memecoin_scorer/internal/state"
 )
@@ -113,6 +114,46 @@ func pollerFromEnv(health *ingestor.IngressHealth) *ingestor.Poller {
 		Programs: programs,
 		Interval: interval,
 	}, health)
+}
+
+// depthClientFromEnv constructs a DepthClient when SOLANA_RPC_URL is set.
+// Returns nil when the env var is absent — all callers treat nil as "depth unavailable".
+//
+// Env vars:
+//
+//	SOLANA_RPC_URL   Solana JSON-RPC endpoint (e.g. https://mainnet.helius-rpc.com/?api-key=…)
+func depthClientFromEnv() *rpc.DepthClient {
+	rpcURL := strings.TrimSpace(os.Getenv("SOLANA_RPC_URL"))
+	if rpcURL == "" {
+		log.Printf("depth client: SOLANA_RPC_URL not set — real pool depth disabled, using observed_swaps_proxy")
+		return nil
+	}
+	c := rpc.NewClient(rpcURL, 3*time.Second)
+	log.Printf("depth client: Raydium pc_vault depth enabled (rpc=%s)", rpcURL)
+	return rpc.NewDepthClient(c)
+}
+
+// makeApplyFn returns a function that applies a swap event to the store and,
+// when a DepthClient is configured and the event carries a pool account address,
+// asynchronously fetches real pool depth and updates the store via UpdateDepth.
+//
+// The goroutine is bounded by a 2-second context; failures are silent (real depth
+// remains -1 and the observed_swaps_proxy fallback continues to apply).
+func makeApplyFn(store *state.Store, dc *rpc.DepthClient) func(model.SwapEvent) bool {
+	return func(ev model.SwapEvent) bool {
+		applied := store.Apply(ev)
+		if applied && dc != nil && ev.PoolAccountAddr != "" {
+			go func(mint, poolAddr string) {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				result := dc.FetchDepth(ctx, poolAddr)
+				if result.SOL >= 0 {
+					store.UpdateDepth(mint, result.SOL, result.Source)
+				}
+			}(ev.TokenMint, ev.PoolAccountAddr)
+		}
+		return applied
+	}
 }
 
 // liveConfigFromEnv builds a LiveConfig from environment variables.
@@ -242,8 +283,11 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	depthClient := depthClientFromEnv()
+	applyFn := makeApplyFn(store, depthClient)
+
 	if poller != nil {
-		poller.Start(ctx, store.Apply)
+		poller.Start(ctx, applyFn)
 	}
 
 	go func() {
@@ -257,13 +301,15 @@ func main() {
 		}
 	}()
 
-	srv := newServerWithCalibration(store, dbStore, calibrationRecorder, secret, liveCfg, ingressHealth, poller)
+	srv := newServerWithCalibration(store, dbStore, calibrationRecorder, secret, liveCfg, ingressHealth, poller, depthClient)
 
 	addr := ":" + resolveIngestorPort()
 	log.Printf("ingestor listening on http://localhost%s", addr)
 	log.Fatal(http.ListenAndServe(addr, srv))
 }
 
+// newServer is the test-compatible constructor. It always passes nil DepthClient
+// (no real depth RPC in tests). Signature is intentionally stable.
 func newServer(
 	store *state.Store,
 	dbStore *db.Store,
@@ -272,7 +318,7 @@ func newServer(
 	ingressHealth *ingestor.IngressHealth,
 	poller *ingestor.Poller,
 ) http.Handler {
-	return newServerWithCalibration(store, dbStore, calibration.NewRecorder(), secret, liveCfg, ingressHealth, poller)
+	return newServerWithCalibration(store, dbStore, calibration.NewRecorder(), secret, liveCfg, ingressHealth, poller, nil)
 }
 
 func newServerWithCalibration(
@@ -283,10 +329,11 @@ func newServerWithCalibration(
 	liveCfg live.LiveConfig,
 	ingressHealth *ingestor.IngressHealth,
 	poller *ingestor.Poller,
+	depthClient *rpc.DepthClient,
 ) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", makeHealthzHandler(liveCfg, ingressHealth, poller))
-	mux.HandleFunc("/webhook", makeWebhookHandler(store, dbStore, secret))
+	mux.HandleFunc("/webhook", makeWebhookHandler(store, dbStore, secret, depthClient))
 	mux.HandleFunc("/api/snapshots", makeSnapshotsHandler(store, dbStore, calibrationRecorder, liveCfg))
 	mux.HandleFunc("/api/calibration-samples", makeCalibrationSamplesHandler(calibrationRecorder))
 
@@ -344,7 +391,8 @@ func makeHealthzHandler(
 	}
 }
 
-func makeWebhookHandler(store *state.Store, dbStore *db.Store, secret string) http.HandlerFunc {
+func makeWebhookHandler(store *state.Store, dbStore *db.Store, secret string, depthClient *rpc.DepthClient) http.HandlerFunc {
+	applyFn := makeApplyFn(store, depthClient)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -370,7 +418,7 @@ func makeWebhookHandler(store *state.Store, dbStore *db.Store, secret string) ht
 		applied := 0
 		ctx := r.Context()
 		for _, ev := range events {
-			if store.Apply(ev) {
+			if applyFn(ev) {
 				applied++
 				// Persist raw swap event to DB (best-effort, non-blocking).
 				go dbStore.InsertSwapEvent(context.WithoutCancel(ctx), ev)

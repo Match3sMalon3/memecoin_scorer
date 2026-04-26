@@ -137,6 +137,7 @@ func (s *Store) Apply(ev model.SwapEvent) bool {
 			walletBuySOL:     make(map[string]float64),
 			walletSellSOL:    make(map[string]float64),
 			walletFirstBuyAt: make(map[string]time.Time),
+			realPoolDepthSOL: -1, // sentinel: use observed proxy until real depth arrives
 		}
 		s.tokens[ev.TokenMint] = st
 	}
@@ -295,6 +296,24 @@ func (s *Store) PruneStale() int {
 	return n
 }
 
+// UpdateDepth sets the real on-chain pool depth for mint.
+// depthSOL must be >= 0; source should be rpc.LiquiditySourcePCVault.
+// No-op when mint is not known to the store or depthSOL < 0.
+// Safe for concurrent use; typically called from a goroutine spawned after Apply.
+func (s *Store) UpdateDepth(mint string, depthSOL float64, source string) {
+	if depthSOL < 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, ok := s.tokens[mint]
+	if !ok {
+		return
+	}
+	st.realPoolDepthSOL = depthSOL
+	st.realDepthSource = source
+}
+
 // Len returns the number of tokens currently tracked.
 func (s *Store) Len() int {
 	s.mu.RLock()
@@ -350,6 +369,12 @@ type tokenState struct {
 	// lastPriceSOL is the most recently observed price (SOLAmount/TokenAmount).
 	// Updated on every buy event where both fields are > 0.
 	lastPriceSOL float64
+
+	// realPoolDepthSOL is the on-chain WSOL reserve depth from a Raydium pc_vault query.
+	// -1 = not yet available; >= 0 = verified depth. Updated by UpdateDepth.
+	realPoolDepthSOL float64
+	// realDepthSource is the evidence source label when realPoolDepthSOL >= 0.
+	realDepthSource string
 }
 
 type timestampedBuy struct {
@@ -374,7 +399,20 @@ func deriveSnapshot(st *tokenState, now time.Time) model.TokenSnapshot {
 		age = 0
 	}
 
-	liq := st.buySOL + st.sellSOL
+	// Prefer verified on-chain depth; fall back to observed swap-flow proxy.
+	var liq float64
+	var liqSource string
+	var liqReliable bool
+	if st.realPoolDepthSOL >= 0 {
+		liq = st.realPoolDepthSOL
+		liqSource = st.realDepthSource
+		liqReliable = true
+	} else {
+		liq = st.buySOL + st.sellSOL
+		liqSource = "observed_swaps_proxy"
+		liqReliable = false
+	}
+
 	marketCap, marketCapReason := derivedMarketCap(st)
 	lastPriceReason := ""
 	if st.lastPriceSOL <= 0 {
@@ -405,7 +443,9 @@ func deriveSnapshot(st *tokenState, now time.Time) model.TokenSnapshot {
 		UniqueWalletsLast1m: walletsInWindow(st.buyHistory, now, time.Minute),
 		UniqueWalletsLast5m: walletsInWindow(st.buyHistory, now, 5*time.Minute),
 		// 7-gate fields
-		LiquidityPoolSOL:   liq,
+		LiquidityPoolSOL:        liq,
+		LiquidityEvidenceSource: liqSource,
+		LiquidityProxyReliable:  liqReliable,
 		Volume24hSOL:       volume24h(st, now),
 		Top10HolderPct:     engine.ComputeTop10HolderPct(st.walletNetTokens),
 		HolderCount:        engine.CountHolders(st.walletNetTokens),
