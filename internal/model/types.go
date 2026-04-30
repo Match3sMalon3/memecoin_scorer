@@ -199,10 +199,17 @@ type TokenSnapshot struct {
 	// Used by Gate 1 (Liquidity/MC) and Gate 7 (slippage ceiling). Zero = not yet computed.
 	LiquidityPoolSOL float64 `json:"liquidity_pool_sol"`
 
+	// RealPoolDepthSOL is the raw on-chain reserve depth sentinel.
+	// -1 = unavailable; the system uses observed_swaps_proxy as fallback.
+	// >= 0 = verified depth from a Raydium pc_vault getTokenAccountBalance query.
+	// Always present in JSON (no omitempty); -1 is the expected fallback value when
+	// SOLANA_RPC_URL is not configured or the pool account is not extractable.
+	RealPoolDepthSOL float64 `json:"real_pool_depth_sol"`
+
 	// LiquidityEvidenceSource names the backing source for LiquidityPoolSOL.
 	// "observed_swaps_proxy" — cumulative swap flow (unreliable proxy).
 	// "raydium_pc_vault"     — on-chain WSOL reserve via getTokenAccountBalance.
-	LiquidityEvidenceSource string `json:"liquidity_evidence_source,omitempty"`
+	LiquidityEvidenceSource string `json:"liquidity_evidence_source"`
 
 	// LiquidityProxyReliable is true only when LiquidityEvidenceSource is "raydium_pc_vault".
 	// false means LiquidityPoolSOL is an observed proxy and must not be described as verified depth.

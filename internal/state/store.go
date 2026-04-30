@@ -442,8 +442,9 @@ func deriveSnapshot(st *tokenState, now time.Time) model.TokenSnapshot {
 		// Wallet lists for effective-buyer clustering (not serialised to JSON)
 		UniqueWalletsLast1m: walletsInWindow(st.buyHistory, now, time.Minute),
 		UniqueWalletsLast5m: walletsInWindow(st.buyHistory, now, 5*time.Minute),
-		// 7-gate fields
+		// 7-gate fields — RealPoolDepthSOL carries the raw sentinel (-1 when unavailable).
 		LiquidityPoolSOL:        liq,
+		RealPoolDepthSOL:        st.realPoolDepthSOL,
 		LiquidityEvidenceSource: liqSource,
 		LiquidityProxyReliable:  liqReliable,
 		Volume24hSOL:       volume24h(st, now),

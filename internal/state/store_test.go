@@ -1,6 +1,7 @@
 package state_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 	"testing"
@@ -774,4 +775,78 @@ func TestStore_ConcurrentPruneAndSnapshot(t *testing.T) {
 		}
 	}()
 	wg.Wait()
+}
+
+// ---- real_pool_depth_sol contract ----
+
+// TestSnapshot_RealPoolDepthSOL_DefaultSentinel verifies that a fresh token
+// snapshot always emits real_pool_depth_sol = -1 when no depth has been fetched.
+func TestSnapshot_RealPoolDepthSOL_DefaultSentinel(t *testing.T) {
+	s := state.New()
+	s.Apply(makeBuy("sig1", "w1", testMint, epoch, 1.0))
+
+	snap, ok := s.Snapshot(testMint)
+	if !ok {
+		t.Fatal("snapshot not found")
+	}
+	if snap.RealPoolDepthSOL != -1 {
+		t.Errorf("RealPoolDepthSOL = %v, want -1 (sentinel for unavailable)", snap.RealPoolDepthSOL)
+	}
+	if snap.LiquidityEvidenceSource != "observed_swaps_proxy" {
+		t.Errorf("LiquidityEvidenceSource = %q, want %q", snap.LiquidityEvidenceSource, "observed_swaps_proxy")
+	}
+	if snap.LiquidityProxyReliable {
+		t.Errorf("LiquidityProxyReliable = true, want false for observed proxy")
+	}
+}
+
+// TestSnapshot_RealPoolDepthSOL_UpdateDepth verifies that UpdateDepth overwrites
+// the sentinel and sets evidence source to raydium_pc_vault with reliable=true.
+func TestSnapshot_RealPoolDepthSOL_UpdateDepth(t *testing.T) {
+	s := state.New()
+	s.Apply(makeBuy("sig1", "w1", testMint, epoch, 1.0))
+
+	s.UpdateDepth(testMint, 75.5, "raydium_pc_vault")
+
+	snap, ok := s.Snapshot(testMint)
+	if !ok {
+		t.Fatal("snapshot not found")
+	}
+	if snap.RealPoolDepthSOL != 75.5 {
+		t.Errorf("RealPoolDepthSOL = %v, want 75.5", snap.RealPoolDepthSOL)
+	}
+	if snap.LiquidityEvidenceSource != "raydium_pc_vault" {
+		t.Errorf("LiquidityEvidenceSource = %q, want %q", snap.LiquidityEvidenceSource, "raydium_pc_vault")
+	}
+	if !snap.LiquidityProxyReliable {
+		t.Errorf("LiquidityProxyReliable = false, want true when raydium_pc_vault depth is set")
+	}
+	if snap.LiquidityPoolSOL != 75.5 {
+		t.Errorf("LiquidityPoolSOL = %v, want 75.5 (real depth overrides proxy)", snap.LiquidityPoolSOL)
+	}
+}
+
+// TestSnapshot_RealPoolDepthSOL_JSONPresent verifies the field appears in JSON
+// with value -1 (not omitted) for fallback rows.
+func TestSnapshot_RealPoolDepthSOL_JSONPresent(t *testing.T) {
+	s := state.New()
+	s.Apply(makeBuy("sig1", "w1", testMint, epoch, 1.0))
+	snap, _ := s.Snapshot(testMint)
+
+	data, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+
+	v, present := m["real_pool_depth_sol"]
+	if !present {
+		t.Fatalf("real_pool_depth_sol missing from JSON (must not be omitempty)")
+	}
+	if v.(float64) != -1 {
+		t.Errorf("real_pool_depth_sol JSON value = %v, want -1", v)
+	}
 }
