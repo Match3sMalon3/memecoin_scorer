@@ -72,12 +72,15 @@ func ScoreEarlyProxy(s model.LiveSnapshot) model.EarlyProxyScore {
 	} else if s.HolderCount > 0 {
 		score += 2
 	}
-	if s.LiquidityProxySOL >= 20 {
-		score += 10
-		reasons = append(reasons, "liquidity above minimum")
-	} else if s.LiquidityProxySOL >= 5 {
-		score += 6
-		reasons = append(reasons, "minimum liquidity present")
+	liquiditySOL := liquidityForScoring(s)
+	if verifiedPoolDepth(s) {
+		if liquiditySOL >= 20 {
+			score += 10
+			reasons = append(reasons, "liquidity above minimum")
+		} else if liquiditySOL >= 5 {
+			score += 6
+			reasons = append(reasons, "minimum liquidity present")
+		}
 	}
 	if s.EstimatedImpactPct > 0 && s.EstimatedImpactPct <= 5 {
 		score += 8
@@ -117,6 +120,9 @@ func ScoreEarlyProxy(s model.LiveSnapshot) model.EarlyProxyScore {
 		score *= 0.75
 		reasons = append(reasons, "low evidence coverage")
 	}
+	if !verifiedPoolDepth(s) && hasRealBuyerFlow(s) {
+		reasons = append(reasons, "runner-like flow, liquidity unverified")
+	}
 
 	if hardRugVeto(s) {
 		score = 0
@@ -124,10 +130,14 @@ func ScoreEarlyProxy(s model.LiveSnapshot) model.EarlyProxyScore {
 
 	score = clamp(score, 0, 100)
 	band := bandFor(score, risks)
+	if !apexEligible(s) && band == "APEX" {
+		band = "CANDIDATE"
+	}
+	band = applyLiquidityEvidenceBandCap(s, band)
 	if unreliableObservedLiquidityProxy(s) && s.LiquidityProxySOL < 5 {
 		if qualifiesForUnreliableLiquidityWatch(s) {
 			score = math.Max(score, 45)
-			band = "WATCH"
+			band = applyLiquidityEvidenceBandCap(s, "WATCH")
 			reasons = append(reasons, "real buyer flow despite unreliable liquidity proxy")
 		} else {
 			score = 0
@@ -200,10 +210,16 @@ func observedRiskFlags(s model.LiveSnapshot) []string {
 	} else if s.Top10HolderPct >= 0.85 {
 		risks = append(risks, "high top10 concentration")
 	}
-	if s.LiquidityProxySOL < 5 {
-		if unreliableObservedLiquidityProxy(s) {
+	if !verifiedPoolDepth(s) {
+		risks = append(risks, "unverified pool depth")
+	}
+	liquiditySOL := liquidityForScoring(s)
+	if liquiditySOL < 5 {
+		if verifiedPoolDepth(s) {
+			risks = append(risks, "pool depth below 5 SOL")
+		} else if unreliableObservedLiquidityProxy(s) {
 			risks = append(risks, "observed liq proxy below 5 SOL")
-		} else if s.LiquidityProxySOL > 0 {
+		} else if liquiditySOL > 0 {
 			risks = append(risks, "very thin liquidity")
 		}
 	}
@@ -232,7 +248,8 @@ func riskPenalty(s model.LiveSnapshot) float64 {
 	if s.Top10HolderPct >= 0.85 {
 		penalty += 10
 	}
-	if s.LiquidityProxySOL > 0 && s.LiquidityProxySOL < 5 && !unreliableObservedLiquidityProxy(s) {
+	liquiditySOL := liquidityForScoring(s)
+	if liquiditySOL > 0 && liquiditySOL < 5 && verifiedPoolDepth(s) {
 		penalty += 12
 	}
 	if s.EstimatedImpactPct > 25 {
@@ -250,7 +267,13 @@ func hardRugVeto(s model.LiveSnapshot) bool {
 	if s.Top10HolderPct >= 0.95 {
 		return true
 	}
+	if s.ClusteringRowStatus == "full_fallback" {
+		return true
+	}
 	if s.BuyersLast1m == 0 && s.BuyersLast5m == 0 && s.BuySolLast1m == 0 {
+		return true
+	}
+	if highImpactWithoutCompensatingEvidence(s) {
 		return true
 	}
 	if s.Engine.Layer0Reject {
@@ -263,6 +286,59 @@ func hardRugVeto(s model.LiveSnapshot) bool {
 		}
 	}
 	return false
+}
+
+func liquidityForScoring(s model.LiveSnapshot) float64 {
+	if s.RealPoolDepthSOL >= 0 {
+		return s.RealPoolDepthSOL
+	}
+	return s.LiquidityProxySOL
+}
+
+func verifiedPoolDepth(s model.LiveSnapshot) bool {
+	return s.LiquidityProxyReliable &&
+		strings.EqualFold(s.LiquidityEvidenceSource, "raydium_pc_vault") &&
+		s.RealPoolDepthSOL >= 0
+}
+
+func apexEligible(s model.LiveSnapshot) bool {
+	return verifiedPoolDepth(s) &&
+		s.RealPoolDepthSOL >= 5 &&
+		s.EstimatedImpactPct <= 15 &&
+		s.Top10HolderPct < 0.95 &&
+		s.ClusteringRowStatus != "full_fallback" &&
+		s.EffectiveBuyers5m >= 5
+}
+
+func applyLiquidityEvidenceBandCap(s model.LiveSnapshot, band string) string {
+	if s.LiquidityProxyReliable && s.RealPoolDepthSOL >= 0 {
+		return band
+	}
+	if s.EstimatedImpactPct >= 90 && bandRank(band) > bandRank("WATCH") {
+		return "WATCH"
+	}
+	if s.EstimatedImpactPct >= 50 && bandRank(band) > bandRank("WATCH") {
+		return "WATCH"
+	}
+	if bandRank(band) > bandRank("CANDIDATE") {
+		return "CANDIDATE"
+	}
+	return band
+}
+
+func bandRank(band string) int {
+	switch band {
+	case "APEX":
+		return 4
+	case "CANDIDATE":
+		return 3
+	case "WATCH":
+		return 2
+	case "DEAD":
+		return 1
+	default:
+		return 0
+	}
 }
 
 func qualifiesForUnreliableLiquidityWatch(s model.LiveSnapshot) bool {

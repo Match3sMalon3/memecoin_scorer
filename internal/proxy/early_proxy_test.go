@@ -38,13 +38,13 @@ func TestScoreEarlyProxySeparatesMissingEvidenceFromRisk(t *testing.T) {
 	}
 }
 
-func TestScoreEarlyProxyDoesNotZeroForStructuralRiskUnlessHardVeto(t *testing.T) {
+func TestScoreEarlyProxyFullFallbackIsDead(t *testing.T) {
 	row := strongRow()
 	row.ClusteringRowStatus = "full_fallback"
 
 	got := proxy.ScoreEarlyProxy(row)
-	if got.Score == 0 {
-		t.Fatalf("score was zeroed for non-hard structural risk: %+v", got)
+	if got.Score != 0 || got.Band != "DEAD" {
+		t.Fatalf("score=%.2f band=%q, want DEAD for full fallback", got.Score, got.Band)
 	}
 	if !contains(got.RiskFlags, "full clustering fallback") {
 		t.Fatalf("risk_flags=%v, want full fallback risk", got.RiskFlags)
@@ -54,8 +54,8 @@ func TestScoreEarlyProxyDoesNotZeroForStructuralRiskUnlessHardVeto(t *testing.T)
 func TestScoreEarlyProxyReturnsWatchForPromisingFlowWithPartialFallback(t *testing.T) {
 	row := model.LiveSnapshot{
 		TokenSnapshot: model.TokenSnapshot{
-			BuyersLast1m:      3,
-			BuyersLast5m:      5,
+			BuyersLast1m:      5,
+			BuyersLast5m:      6,
 			BuySolLast1m:      1.5,
 			SellSolLast1m:     0.4,
 			BuyerAcceleration: 1.2,
@@ -63,8 +63,8 @@ func TestScoreEarlyProxyReturnsWatchForPromisingFlowWithPartialFallback(t *testi
 			MarketCapSOL:      12,
 			Top10HolderPct:    0.50,
 		},
-		EffectiveBuyers1m:   1,
-		EffectiveBuyers5m:   3,
+		EffectiveBuyers1m:   3,
+		EffectiveBuyers5m:   5,
 		LiquidityProxySOL:   8,
 		EstimatedImpactPct:  20,
 		ClusteringRowStatus: "partial_fallback",
@@ -165,6 +165,75 @@ func TestScoreEarlyProxyUnreliableThinProxyFullFallbackRemainsDead(t *testing.T)
 	}
 }
 
+func TestScoreEarlyProxyUnreliableLiquidityHighScoreCannotBeApex(t *testing.T) {
+	row := strongRow()
+	row.RealPoolDepthSOL = -1
+	row.LiquidityEvidenceSource = live.LiquidityEvidenceObservedSwapsProxy
+	row.LiquidityProxyReliable = false
+	row.LiquidityProxySOL = 50
+	row.EstimatedImpactPct = 4
+
+	got := proxy.ScoreEarlyProxy(row)
+	if got.Band == "APEX" {
+		t.Fatalf("band=%q score=%.2f risks=%v, want not APEX for unverified liquidity", got.Band, got.Score, got.RiskFlags)
+	}
+	if got.Band != "CANDIDATE" {
+		t.Fatalf("band=%q score=%.2f, want CANDIDATE cap for high-score unverified liquidity", got.Band, got.Score)
+	}
+	if !contains(got.RiskFlags, "unverified pool depth") {
+		t.Fatalf("risk_flags=%v, want unverified pool depth", got.RiskFlags)
+	}
+	if !contains(got.Reasons, "runner-like flow, liquidity unverified") {
+		t.Fatalf("reasons=%v, want unverified liquidity flow reason", got.Reasons)
+	}
+}
+
+func TestScoreEarlyProxyUnreliableLiquidityStrongFlowCappedToWatchOnHighImpact(t *testing.T) {
+	row := strongRow()
+	row.RealPoolDepthSOL = -1
+	row.LiquidityEvidenceSource = live.LiquidityEvidenceObservedSwapsProxy
+	row.LiquidityProxyReliable = false
+	row.LiquidityProxySOL = 20
+	row.EstimatedImpactPct = 55
+
+	got := proxy.ScoreEarlyProxy(row)
+	if got.Band != "WATCH" {
+		t.Fatalf("band=%q score=%.2f risks=%v, want WATCH cap for unverified liquidity with high impact", got.Band, got.Score, got.RiskFlags)
+	}
+	if contains(got.Reasons, "minimum liquidity present") || contains(got.Reasons, "liquidity above minimum") {
+		t.Fatalf("reasons=%v, must not claim verified liquidity when source is unreliable", got.Reasons)
+	}
+}
+
+func TestScoreEarlyProxyReliableRealDepthCanBeApex(t *testing.T) {
+	row := reliableStrongRow()
+
+	got := proxy.ScoreEarlyProxy(row)
+	if got.Band != "APEX" {
+		t.Fatalf("band=%q score=%.2f reasons=%v risks=%v, want APEX with verified depth", got.Band, got.Score, got.Reasons, got.RiskFlags)
+	}
+}
+
+func TestScoreEarlyProxyReliableDepthExtremeTop10PreventsApex(t *testing.T) {
+	row := reliableStrongRow()
+	row.Top10HolderPct = 0.95
+
+	got := proxy.ScoreEarlyProxy(row)
+	if got.Band != "DEAD" {
+		t.Fatalf("band=%q score=%.2f, want DEAD for extreme top10 even with verified depth", got.Band, got.Score)
+	}
+}
+
+func TestScoreEarlyProxyReliableDepthFullFallbackPreventsApex(t *testing.T) {
+	row := reliableStrongRow()
+	row.ClusteringRowStatus = "full_fallback"
+
+	got := proxy.ScoreEarlyProxy(row)
+	if got.Band != "DEAD" {
+		t.Fatalf("band=%q score=%.2f, want DEAD for full fallback even with verified depth", got.Band, got.Score)
+	}
+}
+
 func TestScoreEarlyProxyAppliesEvidenceCoverageDiscount(t *testing.T) {
 	row := model.LiveSnapshot{
 		TokenSnapshot: model.TokenSnapshot{
@@ -242,6 +311,16 @@ func strongRow() model.LiveSnapshot {
 		AdversarialScore:    0.18,
 		ExecutionPenalty:    0.8,
 	}
+}
+
+func reliableStrongRow() model.LiveSnapshot {
+	row := strongRow()
+	row.RealPoolDepthSOL = 30
+	row.LiquidityEvidenceSource = "raydium_pc_vault"
+	row.LiquidityProxyReliable = true
+	row.LiquidityProxySOL = 30
+	row.EstimatedImpactPct = 4
+	return row
 }
 
 func unreliableThinProxyRow() model.LiveSnapshot {
