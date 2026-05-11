@@ -185,7 +185,7 @@ func makeApplyFn(store *state.Store, dc *rpc.DepthClient) func(model.SwapEvent) 
 					store.UpdateDepth(mint, result.SOL, result.Source)
 					log.Printf("depth client: real pool depth applied mint=%s pool=%s depth=%.4f source=%s", shortLogMint(mint), shortLogMint(poolAddr), result.SOL, result.Source)
 				} else {
-					log.Printf("depth client: pc_vault depth unavailable mint=%s pool=%s fallback=observed_swaps_proxy", shortLogMint(mint), shortLogMint(poolAddr))
+					log.Printf("depth client: verified WSOL vault depth unavailable mint=%s pool=%s fallback=observed_swaps_proxy", shortLogMint(mint), shortLogMint(poolAddr))
 				}
 			}(ev.TokenMint, ev.PoolAccountAddr)
 		}

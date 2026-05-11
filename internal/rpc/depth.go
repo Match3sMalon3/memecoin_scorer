@@ -2,13 +2,16 @@ package rpc
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 )
 
 const (
-	// LiquiditySourcePCVault is set on snapshots when depth is from a Raydium pc_vault query.
+	// LiquiditySourcePCVault is kept for legacy readers; new verified depth uses LiquiditySourceWSOLVault.
 	LiquiditySourcePCVault = "raydium_pc_vault"
+	// LiquiditySourceWSOLVault is set only when a Raydium vault's SPL token mint is verified as WSOL.
+	LiquiditySourceWSOLVault = "raydium_wsol_vault"
 	// LiquiditySourceProxy is the fallback observed-swap-flow source name.
 	LiquiditySourceProxy = "observed_swaps_proxy"
 
@@ -17,10 +20,12 @@ const (
 	depthCacheTTL = 5 * time.Second
 )
 
+var ErrNoWSOLVault = errors.New("rpc: raydium pool has no verified WSOL vault")
+
 // DepthResult holds a fetched pool depth plus its evidence label.
 type DepthResult struct {
 	SOL    float64 // >= 0 when real depth available; -1 = unavailable
-	Source string  // LiquiditySourcePCVault or LiquiditySourceProxy
+	Source string  // LiquiditySourceWSOLVault or LiquiditySourceProxy
 }
 
 // UnavailableDepth is the sentinel returned when real depth cannot be fetched.
@@ -31,24 +36,30 @@ type cachedDepth struct {
 	at  time.Time
 }
 
+type resolvedVault struct {
+	addr string
+	err  error
+}
+
 // DepthClient fetches real Raydium AMM V4 pool depth via Solana JSON-RPC.
 //
 // Discovery path:
 //  1. Given the AMM pool account address (from SwapEvent.PoolAccountAddr).
 //  2. Call getAccountInfo(poolAccount) to fetch the 752-byte AmmInfo layout.
-//  3. Decode pc_vault pubkey at byte offset 368.
-//  4. Call getTokenAccountBalance(pcVault) to read the WSOL reserve.
-//  5. Return the UI amount (WSOL / 10^9 = SOL).
+//  3. Decode coin_vault and pc_vault pubkeys.
+//  4. Fetch each vault account with getAccountInfo and verify its SPL token mint is WSOL.
+//  5. Call getTokenAccountBalance on the verified WSOL vault.
+//  6. Return the UI amount (WSOL / 10^9 = SOL).
 //
 // Caching:
-//   - pc_vault addresses are cached permanently per pool account (they do not change).
-//   - Depth values are cached for depthCacheTTL per pc_vault address.
+//   - Verified WSOL vault addresses are cached permanently per pool account.
+//   - Depth values are cached for depthCacheTTL per verified WSOL vault address.
 //
 // All errors result in DepthResult{SOL: -1} — callers always fall back gracefully.
 type DepthClient struct {
 	rpc        *Client
-	poolCache  sync.Map // poolAccountAddr string → pcVaultAddr string
-	depthCache sync.Map // pcVaultAddr string → cachedDepth
+	poolCache  sync.Map // poolAccountAddr string → verified WSOL vault addr string
+	depthCache sync.Map // WSOL vault addr string → cachedDepth
 
 	// inflight deduplication: prevents stampede when many events arrive simultaneously
 	// for the same pool account before the first RPC call completes.
@@ -57,9 +68,8 @@ type DepthClient struct {
 }
 
 type inflightEntry struct {
-	wg      sync.WaitGroup
-	pcVault string
-	err     error
+	wg    sync.WaitGroup
+	vault resolvedVault
 }
 
 // NewDepthClient wraps an rpc.Client with caching and inflight dedup.
@@ -81,46 +91,37 @@ func (d *DepthClient) FetchDepth(ctx context.Context, poolAccountAddr string) De
 		return UnavailableDepth
 	}
 
-	// Some upstream enhanced swap payloads expose the SOL-side vault directly
-	// rather than the AMM state account. Prefer a direct SPL token balance when
-	// the supplied account is already a token account; AMM accounts fall through
-	// to getAccountInfo layout decoding below.
-	if sol, err := d.rpc.GetTokenAccountBalance(ctx, poolAccountAddr); err == nil {
-		d.depthCache.Store(poolAccountAddr, cachedDepth{sol: sol, at: time.Now()})
-		return DepthResult{SOL: sol, Source: LiquiditySourcePCVault}
-	}
-
-	pcVault, err := d.resolvePCVault(ctx, poolAccountAddr)
-	if err != nil || pcVault == "" {
+	wsolVault, err := d.resolveWSOLVault(ctx, poolAccountAddr)
+	if err != nil || wsolVault == "" {
 		return UnavailableDepth
 	}
 
 	// Check depth cache.
-	if v, ok := d.depthCache.Load(pcVault); ok {
+	if v, ok := d.depthCache.Load(wsolVault); ok {
 		cd := v.(cachedDepth)
 		if time.Since(cd.at) < depthCacheTTL {
 			if cd.sol >= 0 {
-				return DepthResult{SOL: cd.sol, Source: LiquiditySourcePCVault}
+				return DepthResult{SOL: cd.sol, Source: LiquiditySourceWSOLVault}
 			}
 			return UnavailableDepth
 		}
 	}
 
-	// Fetch fresh balance.
-	sol, err := d.rpc.GetTokenAccountBalance(ctx, pcVault)
+	// Fetch fresh balance from the already verified WSOL vault.
+	sol, err := d.rpc.GetTokenAccountBalance(ctx, wsolVault)
 	if err != nil {
 		// Cache the failure briefly to avoid retry storms.
-		d.depthCache.Store(pcVault, cachedDepth{sol: -1, at: time.Now()})
+		d.depthCache.Store(wsolVault, cachedDepth{sol: -1, at: time.Now()})
 		return UnavailableDepth
 	}
 
-	d.depthCache.Store(pcVault, cachedDepth{sol: sol, at: time.Now()})
-	return DepthResult{SOL: sol, Source: LiquiditySourcePCVault}
+	d.depthCache.Store(wsolVault, cachedDepth{sol: sol, at: time.Now()})
+	return DepthResult{SOL: sol, Source: LiquiditySourceWSOLVault}
 }
 
-// resolvePCVault returns the pc_vault address for poolAccountAddr, fetching
-// and caching it via getAccountInfo when not already known.
-func (d *DepthClient) resolvePCVault(ctx context.Context, poolAccountAddr string) (string, error) {
+// resolveWSOLVault returns the verified WSOL vault address for poolAccountAddr,
+// fetching and caching it via getAccountInfo when not already known.
+func (d *DepthClient) resolveWSOLVault(ctx context.Context, poolAccountAddr string) (string, error) {
 	// Fast path: permanent cache hit.
 	if v, ok := d.poolCache.Load(poolAccountAddr); ok {
 		return v.(string), nil
@@ -131,7 +132,7 @@ func (d *DepthClient) resolvePCVault(ctx context.Context, poolAccountAddr string
 	if e, ok := d.inflight[poolAccountAddr]; ok {
 		d.inflightMu.Unlock()
 		e.wg.Wait()
-		return e.pcVault, e.err
+		return e.vault.addr, e.vault.err
 	}
 	e := &inflightEntry{}
 	e.wg.Add(1)
@@ -147,17 +148,29 @@ func (d *DepthClient) resolvePCVault(ctx context.Context, poolAccountAddr string
 
 	data, err := d.rpc.GetAccountInfo(ctx, poolAccountAddr)
 	if err != nil {
-		e.err = err
+		e.vault.err = err
 		return "", err
 	}
 
-	pcVault, err := PCVaultFromAMMData(data)
+	coinVault, pcVault, err := VaultsFromAMMData(data)
 	if err != nil {
-		e.err = err
+		e.vault.err = err
 		return "", err
 	}
 
-	d.poolCache.Store(poolAccountAddr, pcVault)
-	e.pcVault = pcVault
-	return pcVault, nil
+	for _, vault := range []string{pcVault, coinVault} {
+		info, err := d.rpc.GetTokenAccountInfo(ctx, vault)
+		if err != nil {
+			e.vault.err = err
+			return "", err
+		}
+		if info.Mint == WSOLMint {
+			d.poolCache.Store(poolAccountAddr, vault)
+			e.vault.addr = vault
+			return vault, nil
+		}
+	}
+
+	e.vault.err = ErrNoWSOLVault
+	return "", ErrNoWSOLVault
 }

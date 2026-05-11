@@ -3,8 +3,9 @@
 package rpc
 
 const (
-	RaydiumAMMV4DataSize  = raydiumAMMV4DataSize
-	PCVaultOffsetExported = pcVaultOffset
+	RaydiumAMMV4DataSize    = raydiumAMMV4DataSize
+	PCVaultOffsetExported   = pcVaultOffset
+	CoinVaultOffsetExported = coinVaultOffset
 )
 
 // Base58EncodeExported exposes the internal base58 encoder for test assertions.

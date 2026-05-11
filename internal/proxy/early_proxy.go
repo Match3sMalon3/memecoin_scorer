@@ -523,7 +523,8 @@ func liquidityForScoring(s model.LiveSnapshot) float64 {
 
 func verifiedPoolDepth(s model.LiveSnapshot) bool {
 	return s.LiquidityProxyReliable &&
-		strings.EqualFold(s.LiquidityEvidenceSource, "raydium_pc_vault") &&
+		(strings.EqualFold(s.LiquidityEvidenceSource, "raydium_pc_vault") ||
+			strings.EqualFold(s.LiquidityEvidenceSource, "raydium_wsol_vault")) &&
 		s.RealPoolDepthSOL >= 0
 }
 

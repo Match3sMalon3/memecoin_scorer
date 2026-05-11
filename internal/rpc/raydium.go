@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"math/big"
 )
@@ -23,12 +24,21 @@ import (
 //	... 11 more pubkeys follow ...
 //	total layout size: 752 bytes
 const (
+	WSOLMint = "So11111111111111111111111111111111111111112"
+
 	raydiumAMMV4MinSize  = 400 // conservatively require at least up through pcVault
 	raydiumAMMV4DataSize = 752 // canonical full layout size
 
 	coinVaultOffset = 336 // poolCoinTokenAccount
 	pcVaultOffset   = 368 // poolPcTokenAccount (WSOL/SOL reserve)
 )
+
+type TokenAccountInfo struct {
+	Mint     string
+	Owner    string
+	Amount   uint64
+	Decimals int
+}
 
 // PCVaultFromAMMData extracts the Raydium AMM V4 pc_vault (WSOL reserve) pubkey
 // from raw account data. Returns the pubkey as a base58-encoded string.
@@ -61,6 +71,29 @@ func CoinVaultFromAMMData(data []byte) (string, error) {
 		return "", fmt.Errorf("raydium amm coin_vault pubkey is all-zero (uninitialized)")
 	}
 	return base58Encode(keyBytes), nil
+}
+
+func VaultsFromAMMData(data []byte) (coinVault string, pcVault string, err error) {
+	coinVault, err = CoinVaultFromAMMData(data)
+	if err != nil {
+		return "", "", err
+	}
+	pcVault, err = PCVaultFromAMMData(data)
+	if err != nil {
+		return "", "", err
+	}
+	return coinVault, pcVault, nil
+}
+
+func DecodeSPLTokenAccount(data []byte) (TokenAccountInfo, error) {
+	if len(data) < 72 {
+		return TokenAccountInfo{}, fmt.Errorf("spl token account data too short: got %d bytes, need at least 72", len(data))
+	}
+	return TokenAccountInfo{
+		Mint:   base58Encode(data[0:32]),
+		Owner:  base58Encode(data[32:64]),
+		Amount: binary.LittleEndian.Uint64(data[64:72]),
+	}, nil
 }
 
 func isAllZero(b []byte) bool {

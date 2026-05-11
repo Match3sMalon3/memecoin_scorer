@@ -318,7 +318,7 @@ func (s *Store) PruneStale() int {
 }
 
 // UpdateDepth sets the real on-chain pool depth for mint.
-// depthSOL must be >= 0; source should be rpc.LiquiditySourcePCVault.
+// depthSOL must be >= 0; source should be a verified WSOL-vault source.
 // No-op when mint is not known to the store or depthSOL < 0.
 // Safe for concurrent use; typically called from a goroutine spawned after Apply.
 func (s *Store) UpdateDepth(mint string, depthSOL float64, source string) {

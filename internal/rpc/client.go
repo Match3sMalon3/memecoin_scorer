@@ -1,5 +1,5 @@
 // Package rpc provides a minimal Solana JSON-RPC 2.0 client.
-// Only the two methods needed for real pool depth discovery are implemented:
+// Only the methods needed for real pool depth discovery are implemented:
 // GetAccountInfo (to decode AMM account layout and find pc_vault) and
 // GetTokenAccountBalance (to read the SOL/WSOL reserve balance).
 package rpc
@@ -137,6 +137,14 @@ func (c *Client) GetAccountInfo(ctx context.Context, pubkey string) ([]byte, err
 		return nil, fmt.Errorf("rpc: base64 decode for %s: %w", pubkey, err)
 	}
 	return raw, nil
+}
+
+func (c *Client) GetTokenAccountInfo(ctx context.Context, pubkey string) (TokenAccountInfo, error) {
+	raw, err := c.GetAccountInfo(ctx, pubkey)
+	if err != nil {
+		return TokenAccountInfo{}, err
+	}
+	return DecodeSPLTokenAccount(raw)
 }
 
 // getTokenAccountBalanceResult mirrors the Solana getTokenAccountBalance response.

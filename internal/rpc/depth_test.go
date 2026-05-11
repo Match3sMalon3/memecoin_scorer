@@ -1,10 +1,12 @@
 package rpc_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,8 +18,22 @@ import (
 // buildAMMData constructs a minimal 752-byte Raydium AMM V4 data blob with
 // the pc_vault pubkey set at offset 368. All other bytes are zero.
 func buildAMMData(pcVaultPubkey [32]byte) []byte {
+	return buildAMMDataWithVaults([32]byte{9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9}, pcVaultPubkey)
+}
+
+func buildAMMDataWithVaults(coinVaultPubkey [32]byte, pcVaultPubkey [32]byte) []byte {
 	data := make([]byte, rpc.RaydiumAMMV4DataSize)
+	copy(data[rpc.CoinVaultOffsetExported:], coinVaultPubkey[:])
 	copy(data[rpc.PCVaultOffsetExported:], pcVaultPubkey[:])
+	return data
+}
+
+func buildTokenAccountData(mint string, amount uint64) []byte {
+	data := make([]byte, 165)
+	mintBytes := mustBase58Decode(mint)
+	copy(data[0:32], mintBytes)
+	copy(data[32:64], bytes.Repeat([]byte{7}, 32))
+	binary.LittleEndian.PutUint64(data[64:72], amount)
 	return data
 }
 
@@ -27,6 +43,13 @@ var knownPCVault = [32]byte{
 	9, 10, 11, 12, 13, 14, 15, 16,
 	17, 18, 19, 20, 21, 22, 23, 24,
 	25, 26, 27, 28, 29, 30, 31, 32,
+}
+
+var knownCoinVault = [32]byte{
+	32, 31, 30, 29, 28, 27, 26, 25,
+	24, 23, 22, 21, 20, 19, 18, 17,
+	16, 15, 14, 13, 12, 11, 10, 9,
+	8, 7, 6, 5, 4, 3, 2, 1,
 }
 
 // knownPoolAccount is a placeholder pool account address for tests.
@@ -102,6 +125,30 @@ func rpcServer(
 }
 
 func floatPtr(v float64) *float64 { return &v }
+
+func mustBase58Decode(s string) []byte {
+	alphabet := "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+	n := big.NewInt(0)
+	base := big.NewInt(58)
+	for _, r := range s {
+		idx := int64(bytes.IndexRune([]byte(alphabet), r))
+		if idx < 0 {
+			panic("invalid base58")
+		}
+		n.Mul(n, base)
+		n.Add(n, big.NewInt(idx))
+	}
+	out := n.Bytes()
+	leading := 0
+	for leading < len(s) && s[leading] == '1' {
+		leading++
+	}
+	out = append(bytes.Repeat([]byte{0}, leading), out...)
+	if len(out) < 32 {
+		out = append(bytes.Repeat([]byte{0}, 32-len(out)), out...)
+	}
+	return out
+}
 
 // TestGetTokenAccountBalance_Success verifies that a successful RPC call
 // returns the UI amount as a float64.
@@ -183,6 +230,9 @@ func TestFetchDepth_RealDepthOverridesProxy(t *testing.T) {
 			if pubkey == knownPoolAccount {
 				return ammData, true
 			}
+			if pubkey == expectedPCVault {
+				return buildTokenAccountData(rpc.WSOLMint, 0), true
+			}
 			return nil, false
 		},
 		func(pubkey string) (*float64, bool) {
@@ -201,8 +251,8 @@ func TestFetchDepth_RealDepthOverridesProxy(t *testing.T) {
 	if result.SOL != expectedDepth {
 		t.Errorf("depth = %v, want %v", result.SOL, expectedDepth)
 	}
-	if result.Source != rpc.LiquiditySourcePCVault {
-		t.Errorf("source = %q, want %q", result.Source, rpc.LiquiditySourcePCVault)
+	if result.Source != rpc.LiquiditySourceWSOLVault {
+		t.Errorf("source = %q, want %q", result.Source, rpc.LiquiditySourceWSOLVault)
 	}
 }
 
@@ -221,6 +271,153 @@ func TestFetchDepth_ProxyFallbackWhenRPCFails(t *testing.T) {
 	}
 	if result.Source != rpc.LiquiditySourceProxy {
 		t.Errorf("source = %q, want %q", result.Source, rpc.LiquiditySourceProxy)
+	}
+}
+
+func TestFetchDepth_UsesCoinVaultWhenCoinVaultIsWSOL(t *testing.T) {
+	ammData := buildAMMDataWithVaults(knownCoinVault, knownPCVault)
+	pcVault := rpc.Base58EncodeExported(knownPCVault[:])
+	coinVault := rpc.Base58EncodeExported(knownCoinVault[:])
+	expectedDepth := 88.75
+
+	srv := rpcServer(t,
+		func(pubkey string) ([]byte, bool) {
+			switch pubkey {
+			case knownPoolAccount:
+				return ammData, true
+			case pcVault:
+				return buildTokenAccountData("11111111111111111111111111111111", 999_000_000_000), true
+			case coinVault:
+				return buildTokenAccountData(rpc.WSOLMint, 0), true
+			default:
+				return nil, false
+			}
+		},
+		func(pubkey string) (*float64, bool) {
+			if pubkey == coinVault {
+				return floatPtr(expectedDepth), true
+			}
+			return nil, false
+		},
+	)
+	defer srv.Close()
+
+	c := rpc.NewClient(srv.URL, 2*time.Second)
+	result := rpc.NewDepthClient(c).FetchDepth(context.Background(), knownPoolAccount)
+	if result.SOL != expectedDepth || result.Source != rpc.LiquiditySourceWSOLVault {
+		t.Fatalf("got %+v want %.2f from verified coin WSOL vault", result, expectedDepth)
+	}
+}
+
+func TestFetchDepth_NoWSOLVaultFallsBack(t *testing.T) {
+	ammData := buildAMMDataWithVaults(knownCoinVault, knownPCVault)
+	pcVault := rpc.Base58EncodeExported(knownPCVault[:])
+	coinVault := rpc.Base58EncodeExported(knownCoinVault[:])
+
+	srv := rpcServer(t,
+		func(pubkey string) ([]byte, bool) {
+			switch pubkey {
+			case knownPoolAccount:
+				return ammData, true
+			case pcVault, coinVault:
+				return buildTokenAccountData("11111111111111111111111111111111", 999_000_000_000), true
+			default:
+				return nil, false
+			}
+		},
+		func(pubkey string) (*float64, bool) {
+			return floatPtr(165_951_523.412432), true
+		},
+	)
+	defer srv.Close()
+
+	result := rpc.NewDepthClient(rpc.NewClient(srv.URL, 2*time.Second)).FetchDepth(context.Background(), knownPoolAccount)
+	if result.SOL != -1 || result.Source != rpc.LiquiditySourceProxy {
+		t.Fatalf("got %+v want unavailable fallback for non-WSOL vaults", result)
+	}
+}
+
+func TestFetchDepth_VaultAccountInfoErrorFallsBack(t *testing.T) {
+	ammData := buildAMMDataWithVaults(knownCoinVault, knownPCVault)
+
+	srv := rpcServer(t,
+		func(pubkey string) ([]byte, bool) {
+			if pubkey == knownPoolAccount {
+				return ammData, true
+			}
+			return nil, false
+		},
+		func(pubkey string) (*float64, bool) {
+			return floatPtr(100), true
+		},
+	)
+	defer srv.Close()
+
+	result := rpc.NewDepthClient(rpc.NewClient(srv.URL, 2*time.Second)).FetchDepth(context.Background(), knownPoolAccount)
+	if result.SOL != -1 || result.Source != rpc.LiquiditySourceProxy {
+		t.Fatalf("got %+v want unavailable fallback when vault info cannot be verified", result)
+	}
+}
+
+func TestFetchDepth_HugeNonWSOLBalanceDoesNotBecomeDepth(t *testing.T) {
+	ammData := buildAMMDataWithVaults(knownCoinVault, knownPCVault)
+	pcVault := rpc.Base58EncodeExported(knownPCVault[:])
+	coinVault := rpc.Base58EncodeExported(knownCoinVault[:])
+
+	srv := rpcServer(t,
+		func(pubkey string) ([]byte, bool) {
+			switch pubkey {
+			case knownPoolAccount:
+				return ammData, true
+			case pcVault, coinVault:
+				return buildTokenAccountData("11111111111111111111111111111111", 999_000_000_000_000_000), true
+			default:
+				return nil, false
+			}
+		},
+		func(pubkey string) (*float64, bool) {
+			return floatPtr(165_951_523.412432), true
+		},
+	)
+	defer srv.Close()
+
+	result := rpc.NewDepthClient(rpc.NewClient(srv.URL, 2*time.Second)).FetchDepth(context.Background(), knownPoolAccount)
+	if result.SOL >= 0 {
+		t.Fatalf("huge non-WSOL token balance became real depth: %+v", result)
+	}
+}
+
+func TestFetchDepth_HugeWSOLBalanceAllowedOnlyWhenVerified(t *testing.T) {
+	ammData := buildAMMDataWithVaults(knownCoinVault, knownPCVault)
+	pcVault := rpc.Base58EncodeExported(knownPCVault[:])
+	coinVault := rpc.Base58EncodeExported(knownCoinVault[:])
+	expectedDepth := 1_250_000.0
+
+	srv := rpcServer(t,
+		func(pubkey string) ([]byte, bool) {
+			switch pubkey {
+			case knownPoolAccount:
+				return ammData, true
+			case pcVault:
+				return buildTokenAccountData(rpc.WSOLMint, 0), true
+			case coinVault:
+				return buildTokenAccountData("11111111111111111111111111111111", 0), true
+			default:
+				return nil, false
+			}
+		},
+		func(pubkey string) (*float64, bool) {
+			if pubkey == pcVault {
+				return floatPtr(expectedDepth), true
+			}
+			return nil, false
+		},
+	)
+	defer srv.Close()
+
+	result := rpc.NewDepthClient(rpc.NewClient(srv.URL, 2*time.Second)).FetchDepth(context.Background(), knownPoolAccount)
+	if result.SOL != expectedDepth || result.Source != rpc.LiquiditySourceWSOLVault {
+		t.Fatalf("got %+v want verified huge WSOL depth", result)
 	}
 }
 

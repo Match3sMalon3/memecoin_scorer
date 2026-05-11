@@ -828,12 +828,12 @@ func TestSnapshot_RealPoolDepthSOL_DefaultSentinel(t *testing.T) {
 }
 
 // TestSnapshot_RealPoolDepthSOL_UpdateDepth verifies that UpdateDepth overwrites
-// the sentinel and sets evidence source to raydium_pc_vault with reliable=true.
+// the sentinel and sets evidence source to raydium_wsol_vault with reliable=true.
 func TestSnapshot_RealPoolDepthSOL_UpdateDepth(t *testing.T) {
 	s := state.New()
 	s.Apply(makeBuy("sig1", "w1", testMint, epoch, 1.0))
 
-	s.UpdateDepth(testMint, 75.5, "raydium_pc_vault")
+	s.UpdateDepth(testMint, 75.5, "raydium_wsol_vault")
 
 	snap, ok := s.Snapshot(testMint)
 	if !ok {
@@ -842,11 +842,11 @@ func TestSnapshot_RealPoolDepthSOL_UpdateDepth(t *testing.T) {
 	if snap.RealPoolDepthSOL != 75.5 {
 		t.Errorf("RealPoolDepthSOL = %v, want 75.5", snap.RealPoolDepthSOL)
 	}
-	if snap.LiquidityEvidenceSource != "raydium_pc_vault" {
-		t.Errorf("LiquidityEvidenceSource = %q, want %q", snap.LiquidityEvidenceSource, "raydium_pc_vault")
+	if snap.LiquidityEvidenceSource != "raydium_wsol_vault" {
+		t.Errorf("LiquidityEvidenceSource = %q, want %q", snap.LiquidityEvidenceSource, "raydium_wsol_vault")
 	}
 	if !snap.LiquidityProxyReliable {
-		t.Errorf("LiquidityProxyReliable = false, want true when raydium_pc_vault depth is set")
+		t.Errorf("LiquidityProxyReliable = false, want true when raydium_wsol_vault depth is set")
 	}
 	if snap.LiquidityPoolSOL != 75.5 {
 		t.Errorf("LiquidityPoolSOL = %v, want 75.5 (real depth overrides proxy)", snap.LiquidityPoolSOL)
