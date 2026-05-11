@@ -12,14 +12,17 @@ import (
 	"strings"
 	"time"
 
+	"memecoin_scorer/internal/authenticity"
 	"memecoin_scorer/internal/calibration"
 	"memecoin_scorer/internal/cluster"
 	"memecoin_scorer/internal/db"
 	"memecoin_scorer/internal/ingestor"
 	"memecoin_scorer/internal/live"
+	"memecoin_scorer/internal/mode"
 	"memecoin_scorer/internal/model"
 	"memecoin_scorer/internal/proxy"
 	"memecoin_scorer/internal/rpc"
+	"memecoin_scorer/internal/setup"
 	"memecoin_scorer/internal/shadow"
 	"memecoin_scorer/internal/state"
 )
@@ -116,21 +119,52 @@ func pollerFromEnv(health *ingestor.IngressHealth) *ingestor.Poller {
 	}, health)
 }
 
-// depthClientFromEnv constructs a DepthClient when SOLANA_RPC_URL is set.
-// Returns nil when the env var is absent — all callers treat nil as "depth unavailable".
+// depthClientFromEnv constructs a DepthClient from SOLANA_RPC_URL or HELIUS_API_KEY.
+// Returns nil when neither source is available — all callers treat nil as "depth unavailable".
 //
 // Env vars:
 //
 //	SOLANA_RPC_URL   Solana JSON-RPC endpoint (e.g. https://mainnet.helius-rpc.com/?api-key=…)
+//	HELIUS_API_KEY   Fallback source for Helius mainnet RPC when SOLANA_RPC_URL is absent
 func depthClientFromEnv() *rpc.DepthClient {
-	rpcURL := strings.TrimSpace(os.Getenv("SOLANA_RPC_URL"))
+	rpcURL, derived := depthRPCURLFromEnv(os.Getenv)
 	if rpcURL == "" {
-		log.Printf("depth client: SOLANA_RPC_URL not set — real pool depth disabled, using observed_swaps_proxy")
+		log.Printf("depth client: no RPC URL available, real pool depth disabled, using observed_swaps_proxy")
 		return nil
 	}
 	c := rpc.NewClient(rpcURL, 3*time.Second)
-	log.Printf("depth client: Raydium pc_vault depth enabled (rpc=%s)", rpcURL)
+	if derived {
+		log.Printf("depth client: using Helius mainnet RPC (SOLANA_RPC_URL not set, derived from HELIUS_API_KEY)")
+	}
+	log.Printf("depth client: real pool depth ENABLED via %s", maskAPIKey(rpcURL))
 	return rpc.NewDepthClient(c)
+}
+
+func depthRPCURLFromEnv(getenv func(string) string) (string, bool) {
+	rpcURL := strings.TrimSpace(getenv("SOLANA_RPC_URL"))
+	if rpcURL != "" {
+		return rpcURL, false
+	}
+	apiKey := strings.TrimSpace(getenv("HELIUS_API_KEY"))
+	if apiKey == "" {
+		return "", false
+	}
+	return "https://mainnet.helius-rpc.com/?api-key=" + apiKey, true
+}
+
+func maskAPIKey(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	if i := strings.Index(raw, "api-key="); i >= 0 {
+		start := i + len("api-key=")
+		end := len(raw)
+		if amp := strings.Index(raw[start:], "&"); amp >= 0 {
+			end = start + amp
+		}
+		return raw[:start] + "***" + raw[end:]
+	}
+	return raw
 }
 
 // makeApplyFn returns a function that applies a swap event to the store and,
@@ -144,16 +178,27 @@ func makeApplyFn(store *state.Store, dc *rpc.DepthClient) func(model.SwapEvent) 
 		applied := store.Apply(ev)
 		if applied && dc != nil && ev.PoolAccountAddr != "" {
 			go func(mint, poolAddr string) {
-				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				result := dc.FetchDepth(ctx, poolAddr)
 				if result.SOL >= 0 {
 					store.UpdateDepth(mint, result.SOL, result.Source)
+					log.Printf("depth client: real pool depth applied mint=%s pool=%s depth=%.4f source=%s", shortLogMint(mint), shortLogMint(poolAddr), result.SOL, result.Source)
+				} else {
+					log.Printf("depth client: pc_vault depth unavailable mint=%s pool=%s fallback=observed_swaps_proxy", shortLogMint(mint), shortLogMint(poolAddr))
 				}
 			}(ev.TokenMint, ev.PoolAccountAddr)
 		}
 		return applied
 	}
+}
+
+func shortLogMint(v string) string {
+	v = strings.TrimSpace(v)
+	if len(v) <= 8 {
+		return v
+	}
+	return v[:8] + "…"
 }
 
 // liveConfigFromEnv builds a LiveConfig from environment variables.
@@ -335,6 +380,7 @@ func newServerWithCalibration(
 	mux.HandleFunc("/healthz", makeHealthzHandler(liveCfg, ingressHealth, poller))
 	mux.HandleFunc("/webhook", makeWebhookHandler(store, dbStore, secret, depthClient))
 	mux.HandleFunc("/api/snapshots", makeSnapshotsHandler(store, dbStore, calibrationRecorder, liveCfg))
+	mux.HandleFunc("/api/market-context", makeMarketContextHandler(store, liveCfg))
 	mux.HandleFunc("/api/calibration-samples", makeCalibrationSamplesHandler(calibrationRecorder))
 
 	if os.Getenv("ENABLE_LOCAL_ADMIN") == "1" {
@@ -442,12 +488,12 @@ func makeSnapshotsHandler(store *state.Store, dbStore *db.Store, calibrationReco
 		q := r.URL.Query()
 		minBuyers := queryNonNegInt(q.Get("min_buyers"), 0)
 		sinceMinutes := queryInt(q.Get("since_minutes"), 30)
-		limit := queryInt(q.Get("limit"), 100)
+		limit := queryInt(q.Get("limit"), 200)
 		if limit > maxSnapshotLimit {
 			limit = maxSnapshotLimit
 		}
 		if limit <= 0 {
-			limit = 100
+			limit = 200
 		}
 		actionableOnly := q.Get("actionable_only") == "1"
 
@@ -518,7 +564,34 @@ func makeSnapshotsHandler(store *state.Store, dbStore *db.Store, calibrationReco
 			scored.HistoricalTimeToOutcome = live.BuildHistoricalTimeToOutcome(&scored)
 			scored.UpgradeTriggers = live.BuildUpgradeTriggers(&scored)
 			scored.InvalidateTriggers = live.BuildInvalidateTriggers(&scored)
+			buys5m := store.GetBuyEvents(scored.Mint, 5*time.Minute)
+			totalBuySOL5m := 0.0
+			uniqueBuyers5m := map[string]bool{}
+			for _, buy := range buys5m {
+				totalBuySOL5m += buy.SolAmount
+				if buy.Wallet != "" {
+					uniqueBuyers5m[buy.Wallet] = true
+				}
+			}
+			if len(buys5m) > 0 {
+				scored.SolPerTrade5m = totalBuySOL5m / float64(len(buys5m))
+				scored.SOLPerTrade5m = scored.SolPerTrade5m
+			}
+			if len(uniqueBuyers5m) > 0 {
+				scored.SolPerUniqueBuyer5m = totalBuySOL5m / float64(len(uniqueBuyers5m))
+				scored.SOLPerBuyer5m = scored.SolPerUniqueBuyer5m
+			}
+			if scored.BondingCurveProgressPct == 0 {
+				scored.BondingCurveProgressPct = -1
+			}
+			if scored.BondingCurveProgressPct > 0 && scored.VSolPerMinute > 0 {
+				scored.BondingVelocitySolPerMin = scored.VSolPerMinute
+			}
+			proxy.ApplyAuthenticityEvidence(&scored)
 			scored.EarlyProxy = proxy.ScoreEarlyProxy(scored)
+			scored.TokenMode = mode.Classify(scored)
+			scored.Authenticity = authenticity.Detect(scored, buys5m, store.GetWalletEvents(scored.Mint), store.GetCreationBlock(scored.Mint))
+			scored.Setup = setup.Classify(scored)
 			// Persist actionable BUY/READY signals to DB and emit console line.
 			if scored.IsActionable && (scored.Decision == "BUY" || scored.Decision == "READY") {
 				go dbStore.InsertSignal(context.WithoutCancel(r.Context()), scored)
@@ -547,6 +620,60 @@ func makeSnapshotsHandler(store *state.Store, dbStore *db.Store, calibrationReco
 		if err := json.NewEncoder(w).Encode(out); err != nil {
 			log.Printf("snapshots encode: %v", err)
 		}
+	}
+}
+
+func makeMarketContextHandler(store *state.Store, liveCfg live.LiveConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		now := time.Now()
+		snapshots := store.RecentTokens(24 * time.Hour)
+		watched := 0
+		runners := 0
+		best := 0.0
+		for _, s := range snapshots {
+			d := live.ClassifyAt(s, liveCfg, now)
+			row := model.LiveSnapshot{
+				TokenSnapshot:               s,
+				Decision:                    d.Label,
+				ExecutionPenalty:            d.ExecutionPenalty,
+				LiquidityProxySOL:           d.LiquidityProxySOL,
+				EstimatedImpactPct:          d.EstimatedImpactPct,
+				EffectiveBuyers1m:           d.EffectiveBuyers1m,
+				EffectiveBuyers5m:           d.EffectiveBuyers5m,
+				ClusteringRowStatus:         d.ClusteringRowStatus,
+				FundingClusterRatio:         d.FundingClusterRatio,
+				AdversarialScore:            d.AdversarialScore,
+				SignalState:                 d.SignalState,
+				IsActionable:                d.IsActionable,
+				ConfidenceScore:             d.ConfidenceScore,
+				LiquidityProxyReliable:      d.LiquidityProxyReliable,
+				LiquidityEvidenceSource:     d.LiquidityEvidenceSource,
+				LiquidityEvidenceAgeSeconds: d.LiquidityEvidenceAgeSeconds,
+				Engine:                      d.Engine,
+			}
+			proxy.ApplyAuthenticityEvidence(&row)
+			ep := proxy.ScoreEarlyProxy(row)
+			if ep.Score > best {
+				best = ep.Score
+			}
+			switch ep.Band {
+			case "RUNNER":
+				runners++
+			case "WATCH":
+				watched++
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tokens_seen_today":    store.SnapshotCount(24 * time.Hour),
+			"tokens_watched_today": watched,
+			"tokens_runner_now":    runners,
+			"best_score_today":     best,
+		})
 	}
 }
 

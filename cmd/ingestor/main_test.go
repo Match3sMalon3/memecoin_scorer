@@ -93,6 +93,40 @@ func decodeJSON(t *testing.T, r io.Reader) map[string]any {
 	return m
 }
 
+func TestDepthRPCURLFromEnv_DerivesHeliusURL(t *testing.T) {
+	getenv := func(key string) string {
+		if key == "HELIUS_API_KEY" {
+			return "abc123"
+		}
+		return ""
+	}
+	got, derived := depthRPCURLFromEnv(getenv)
+	if !derived {
+		t.Fatal("derived=false, want true")
+	}
+	want := "https://mainnet.helius-rpc.com/?api-key=abc123"
+	if got != want {
+		t.Fatalf("rpcURL=%q, want %q", got, want)
+	}
+}
+
+func TestDepthRPCURLFromEnv_NoSourcesFallsBack(t *testing.T) {
+	got, derived := depthRPCURLFromEnv(func(string) string { return "" })
+	if got != "" || derived {
+		t.Fatalf("rpcURL=%q derived=%v, want empty false", got, derived)
+	}
+}
+
+func TestMaskAPIKey(t *testing.T) {
+	got := maskAPIKey("https://mainnet.helius-rpc.com/?api-key=secret&x=1")
+	if strings.Contains(got, "secret") {
+		t.Fatalf("masked URL leaked key: %s", got)
+	}
+	if !strings.Contains(got, "api-key=***") {
+		t.Fatalf("masked URL=%q, want redacted api-key", got)
+	}
+}
+
 // ---- /healthz ----
 
 func TestHealthz(t *testing.T) {
@@ -420,7 +454,8 @@ func TestSnapshots_FieldsPresent(t *testing.T) {
 		"mint", "first_seen_at", "last_event_at",
 		"unique_buyer_count", "total_buy_sol", "total_sell_sol",
 		"sell_trade_count", "buyers_last1m", "buyers_last5m",
-		"buyer_acceleration", "age_seconds",
+		"buyer_acceleration", "age_seconds", "observed_age_seconds",
+		"observed_first_seen_at", "launch_confidence", "launch_evidence_source",
 	} {
 		if _, ok := s[field]; !ok {
 			t.Errorf("TokenSnapshot field %q missing from response", field)

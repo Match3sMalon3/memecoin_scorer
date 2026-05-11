@@ -132,6 +132,8 @@ func (s *Store) Apply(ev model.SwapEvent) bool {
 			Mint:             ev.TokenMint,
 			FirstSeenAt:      ev.BlockTime,
 			LastEventAt:      ev.BlockTime,
+			firstSeenSlot:    ev.Slot,
+			firstObservedAt:  ev.BlockTime,
 			uniqueBuyers:     make(map[string]struct{}),
 			walletNetTokens:  make(map[string]float64),
 			walletBuySOL:     make(map[string]float64),
@@ -145,12 +147,14 @@ func (s *Store) Apply(ev model.SwapEvent) bool {
 	// This ensures AgeSeconds is accurate even when events arrive out of order.
 	if ev.BlockTime.Before(st.FirstSeenAt) {
 		st.FirstSeenAt = ev.BlockTime
+		st.firstSeenSlot = ev.Slot
 	}
 	if ev.BlockTime.After(st.LastEventAt) {
 		st.LastEventAt = ev.BlockTime
 	}
 
 	st.totalEventCount++
+	st.appendTradeEvent(ev)
 
 	if ev.IsBuy {
 		st.buySOL += ev.SOLAmount
@@ -165,7 +169,7 @@ func (s *Store) Apply(ev model.SwapEvent) bool {
 		if _, seen := st.walletFirstBuyAt[ev.WalletAddr]; !seen {
 			st.walletFirstBuyAt[ev.WalletAddr] = ev.BlockTime
 		}
-		buy := timestampedBuy{At: ev.BlockTime, Wallet: ev.WalletAddr, SOL: ev.SOLAmount, TokenAmount: ev.TokenAmount}
+		buy := timestampedBuy{At: ev.BlockTime, Wallet: ev.WalletAddr, SOL: ev.SOLAmount, TokenAmount: ev.TokenAmount, Block: ev.Slot}
 		if len(st.buyHistory) < MaxBuyHistoryPerToken {
 			st.buyHistory = append(st.buyHistory, buy)
 		} else {
@@ -183,7 +187,7 @@ func (s *Store) Apply(ev model.SwapEvent) bool {
 		}
 		st.walletSellSOL[ev.WalletAddr] += ev.SOLAmount
 
-		sell := timestampedSell{At: ev.BlockTime, Wallet: ev.WalletAddr, SOL: ev.SOLAmount, TokenAmount: ev.TokenAmount}
+		sell := timestampedSell{At: ev.BlockTime, Wallet: ev.WalletAddr, SOL: ev.SOLAmount, TokenAmount: ev.TokenAmount, Block: ev.Slot}
 		if len(st.sellHistory) < MaxSellHistoryPerToken {
 			st.sellHistory = append(st.sellHistory, sell)
 		} else {
@@ -279,6 +283,23 @@ func (s *Store) RecentTokens(window time.Duration) []model.TokenSnapshot {
 	return out
 }
 
+// SnapshotCount returns the number of tokens with at least one event in the
+// requested window. It uses the same recency semantics as RecentTokens without
+// materializing full snapshots for callers that only need the full-store count.
+func (s *Store) SnapshotCount(window time.Duration) int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	cutoff := s.now().Add(-window)
+	n := 0
+	for _, st := range s.tokens {
+		if st.LastEventAt.After(cutoff) {
+			n++
+		}
+	}
+	return n
+}
+
 // PruneStale removes tokens whose LastEventAt is older than StaleDuration.
 // Returns the number of tokens removed. Call this periodically (e.g. every 5 minutes).
 func (s *Store) PruneStale() int {
@@ -331,6 +352,96 @@ func (s *Store) Reset() {
 	s.sigs = newSigRing(SigCacheCap)
 }
 
+func (s *Store) GetBuyEvents(mint string, window time.Duration) []model.BuyEvent {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	st, ok := s.tokens[mint]
+	if !ok {
+		return nil
+	}
+	cutoff := s.now().Add(-window)
+	out := make([]model.BuyEvent, 0, len(st.tradeHistory))
+	for _, ev := range st.tradeHistory {
+		if ev.Side != "buy" || ev.BlockTime.Before(cutoff) {
+			continue
+		}
+		out = append(out, model.BuyEvent{
+			Mint:      mint,
+			Wallet:    ev.Wallet,
+			Block:     ev.Slot,
+			Timestamp: ev.BlockTime,
+			SolAmount: ev.SOLAmount,
+			TokenQty:  ev.TokenAmount,
+		})
+	}
+	return out
+}
+
+func (s *Store) GetBuysInBlock(mint string, block uint64) []model.BuyEvent {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	st, ok := s.tokens[mint]
+	if !ok || block == 0 {
+		return nil
+	}
+	out := make([]model.BuyEvent, 0)
+	for _, ev := range st.tradeHistory {
+		if ev.Side != "buy" || ev.Slot != block {
+			continue
+		}
+		out = append(out, model.BuyEvent{
+			Mint:      mint,
+			Wallet:    ev.Wallet,
+			Block:     ev.Slot,
+			Timestamp: ev.BlockTime,
+			SolAmount: ev.SOLAmount,
+			TokenQty:  ev.TokenAmount,
+		})
+	}
+	return out
+}
+
+func (s *Store) GetWalletEvents(mint string) map[string][]model.WalletEvent {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	st, ok := s.tokens[mint]
+	if !ok {
+		return nil
+	}
+	out := map[string][]model.WalletEvent{}
+	for _, ev := range st.tradeHistory {
+		isBuy := ev.Side == "buy"
+		qty := ev.TokenAmount
+		if !isBuy {
+			qty = -qty
+		}
+		out[ev.Wallet] = append(out[ev.Wallet], model.WalletEvent{
+			Mint:      mint,
+			Wallet:    ev.Wallet,
+			Block:     ev.Slot,
+			Timestamp: ev.BlockTime,
+			IsBuy:     isBuy,
+			TokenQty:  qty,
+			SolAmount: ev.SOLAmount,
+		})
+	}
+	return out
+}
+
+func (s *Store) GetCreationBlock(mint string) uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if _, ok := s.tokens[mint]; !ok {
+		return 0
+	}
+	// Mint-creation slot is not currently captured; 0 means unknown.
+	return 0
+}
+
 // --- internal token state ---
 
 type tokenState struct {
@@ -374,7 +485,14 @@ type tokenState struct {
 	// -1 = not yet available; >= 0 = verified depth. Updated by UpdateDepth.
 	realPoolDepthSOL float64
 	// realDepthSource is the evidence source label when realPoolDepthSOL >= 0.
-	realDepthSource string
+	realDepthSource      string
+	firstSeenSlot        uint64
+	firstObservedAt      time.Time
+	launchDetectedAt     time.Time
+	launchSlot           uint64
+	launchEvidenceSource string
+	creatorWallet        string
+	tradeHistory         []model.TokenTradeEvent
 }
 
 type timestampedBuy struct {
@@ -382,6 +500,7 @@ type timestampedBuy struct {
 	Wallet      string
 	SOL         float64
 	TokenAmount float64
+	Block       uint64
 }
 
 type timestampedSell struct {
@@ -389,6 +508,32 @@ type timestampedSell struct {
 	Wallet      string
 	SOL         float64
 	TokenAmount float64
+	Block       uint64
+}
+
+func (st *tokenState) appendTradeEvent(ev model.SwapEvent) {
+	side := "sell"
+	if ev.IsBuy {
+		side = "buy"
+	}
+	st.tradeHistory = append(st.tradeHistory, model.TokenTradeEvent{
+		Signature:   ev.Signature,
+		Slot:        ev.Slot,
+		BlockTime:   ev.BlockTime,
+		Wallet:      ev.WalletAddr,
+		Side:        side,
+		SOLAmount:   ev.SOLAmount,
+		TokenAmount: ev.TokenAmount,
+		IsCreator:   ev.WalletAddr != "" && ev.WalletAddr == st.creatorWallet,
+	})
+	cutoff := ev.BlockTime.Add(-10 * time.Minute)
+	start := 0
+	for start < len(st.tradeHistory) && (len(st.tradeHistory)-start > 500 || st.tradeHistory[start].BlockTime.Before(cutoff)) {
+		start++
+	}
+	if start > 0 {
+		st.tradeHistory = append([]model.TokenTradeEvent(nil), st.tradeHistory[start:]...)
+	}
 }
 
 // deriveSnapshot computes all TokenSnapshot fields from current tokenState.
@@ -419,19 +564,52 @@ func deriveSnapshot(st *tokenState, now time.Time) model.TokenSnapshot {
 		lastPriceReason = "no priced swap observed yet"
 	}
 
+	// FirstSeenAt is only this ingestor's observed first seen time. Do not promote
+	// it to launch time unless a future mint/pool creation signal explicitly sets
+	// st.launchDetectedAt and st.launchEvidenceSource.
+	var launchDetectedAt *time.Time
+	var launchAgeSeconds *float64
+	launchConfidence := model.LaunchConfidenceUnknown
+	launchEvidenceSource := "unknown"
+	if !st.launchDetectedAt.IsZero() {
+		detected := st.launchDetectedAt
+		launchDetectedAt = &detected
+		age := now.Sub(detected).Seconds()
+		if age < 0 {
+			age = 0
+		}
+		launchAgeSeconds = &age
+		launchConfidence = model.LaunchConfidenceExact
+		if st.launchEvidenceSource != "" {
+			launchEvidenceSource = st.launchEvidenceSource
+		} else {
+			launchEvidenceSource = "pool_creation_tx"
+		}
+	}
+
 	return model.TokenSnapshot{
-		Mint:              st.Mint,
-		FirstSeenAt:       st.FirstSeenAt,
-		LastEventAt:       st.LastEventAt,
-		UniqueBuyerCount:  len(st.uniqueBuyers),
-		TotalBuySOL:       st.buySOL,
-		TotalSellSOL:      st.sellSOL,
-		SellTradeCount:    st.sellTrades,
-		TotalEventCount:   st.totalEventCount,
-		BuyersLast1m:      buyersInWindow(st.buyHistory, now, time.Minute),
-		BuyersLast5m:      buyersInWindow(st.buyHistory, now, 5*time.Minute),
-		BuyerAcceleration: buyerAcceleration(st.buyHistory, now),
-		AgeSeconds:        age,
+		Mint:                 st.Mint,
+		FirstSeenSlot:        st.firstSeenSlot,
+		CreatorWallet:        st.creatorWallet,
+		FirstObservedAt:      st.firstObservedAt,
+		ObservedFirstSeenAt:  st.FirstSeenAt,
+		ObservedAgeSeconds:   age,
+		LaunchDetectedAt:     launchDetectedAt,
+		LaunchSlot:           st.launchSlot,
+		LaunchAgeSeconds:     launchAgeSeconds,
+		LaunchConfidence:     launchConfidence,
+		LaunchEvidenceSource: launchEvidenceSource,
+		FirstSeenAt:          st.FirstSeenAt,
+		LastEventAt:          st.LastEventAt,
+		UniqueBuyerCount:     len(st.uniqueBuyers),
+		TotalBuySOL:          st.buySOL,
+		TotalSellSOL:         st.sellSOL,
+		SellTradeCount:       st.sellTrades,
+		TotalEventCount:      st.totalEventCount,
+		BuyersLast1m:         buyersInWindow(st.buyHistory, now, time.Minute),
+		BuyersLast5m:         buyersInWindow(st.buyHistory, now, 5*time.Minute),
+		BuyerAcceleration:    buyerAcceleration(st.buyHistory, now),
+		AgeSeconds:           age,
 		// Adversarial indicators
 		TopWalletBuyShareLast5m: topWalletBuyShare(st.buyHistory, now, 5*time.Minute),
 		WalletDiversityRatio:    walletDiversityRatio(st.buyHistory, now, 5*time.Minute),
@@ -447,12 +625,12 @@ func deriveSnapshot(st *tokenState, now time.Time) model.TokenSnapshot {
 		RealPoolDepthSOL:        st.realPoolDepthSOL,
 		LiquidityEvidenceSource: liqSource,
 		LiquidityProxyReliable:  liqReliable,
-		Volume24hSOL:       volume24h(st, now),
-		Top10HolderPct:     engine.ComputeTop10HolderPct(st.walletNetTokens),
-		HolderCount:        engine.CountHolders(st.walletNetTokens),
-		OrganicWinnerCount: st.organicWinnerCount,
-		HoldersAt30m:       st.holdersAt30m,
-		HoldersAt60m:       st.holdersAt60m,
+		Volume24hSOL:            volume24h(st, now),
+		Top10HolderPct:          engine.ComputeTop10HolderPct(st.walletNetTokens),
+		HolderCount:             engine.CountHolders(st.walletNetTokens),
+		OrganicWinnerCount:      st.organicWinnerCount,
+		HoldersAt30m:            st.holdersAt30m,
+		HoldersAt60m:            st.holdersAt60m,
 		// MarketCapSOL: derived from last observed price × total tokens held.
 		// lastPriceSOL = SOLAmount/TokenAmount from the most recent buy with both fields > 0.
 		// totalTokensHeld = sum of positive walletNetTokens values (lower-bound observable supply).
@@ -463,6 +641,7 @@ func deriveSnapshot(st *tokenState, now time.Time) model.TokenSnapshot {
 		MarketCapSOL:    marketCap,
 		MarketCapReason: marketCapReason,
 		ShadowFeatures:  shadowFeatureInputs(st, now),
+		TradeHistory:    append([]model.TokenTradeEvent(nil), st.tradeHistory...),
 	}
 }
 

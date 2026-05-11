@@ -12,6 +12,9 @@ const (
 	earlyProxyEvidenceVersion = "early_proxy_v0.1_decision_time_rules"
 )
 
+type EarlyProxyInput = model.LiveSnapshot
+type EarlyProxyResult = model.EarlyProxyScore
+
 func ScoreEarlyProxy(s model.LiveSnapshot) model.EarlyProxyScore {
 	var score float64
 	var reasons []string
@@ -115,6 +118,76 @@ func ScoreEarlyProxy(s model.LiveSnapshot) model.EarlyProxyScore {
 	}
 
 	risks = append(risks, observedRiskFlags(s)...)
+	auth, vel, mode, subtype, why, action := AnalyzeAuthenticity(s)
+	if s.AuthenticityLabel != "" || s.BundleBotDetected || s.SniperBotDetected || s.BumpBotDetected || len(s.BotFlags) > 0 {
+		auth.AuthenticityLabel = s.AuthenticityLabel
+		auth.MechanicalityScore = s.MechanicalityScore
+		auth.BotFlags = s.BotFlags
+		auth.BundleBotDetected = s.BundleBotDetected
+		auth.BundleBotConfidence = s.BundleBotConfidence
+		auth.SniperBotDetected = s.SniperBotDetected
+		auth.SniperShareBuySOL = s.SniperShareEarlyBuySOL
+		auth.BumpBotDetected = s.BumpBotDetected
+		auth.BumpBotScore = s.BumpBotScore
+		auth.BumpBotWallets = s.BumpBotWallets
+		vel.VelocityLabel = s.LiquidityVelocityLabel
+		vel.OrganicLiquidityVelocity = s.OrganicLiquidityVelocity
+		vel.RawLiquidityVelocity = s.RawLiquidityVelocity
+	}
+	invariantInput := s
+	invariantInput.BotFlags = auth.BotFlags
+	invariantInput.AuthenticityLabel = auth.AuthenticityLabel
+	invariantInput.MechanicalityScore = auth.MechanicalityScore
+	invariantInput.BundleBotDetected = auth.BundleBotDetected
+	invariantInput.BundleBotConfidence = auth.BundleBotConfidence
+	invariantInput.SniperBotDetected = auth.SniperBotDetected
+	invariantInput.SniperShareEarlyBuySOL = auth.SniperShareBuySOL
+	invariantInput.BumpBotDetected = auth.BumpBotDetected
+	invariantInput.BumpBotScore = auth.BumpBotScore
+	invariantInput.BumpBotWallets = auth.BumpBotWallets
+	invariantInput.LiquidityVelocityLabel = vel.VelocityLabel
+	invariantInput.RawLiquidityVelocity = vel.RawLiquidityVelocity
+	invariantInput.OrganicLiquidityVelocity = vel.OrganicLiquidityVelocity
+	if invariantInput.SignalMode == "" {
+		invariantInput.SignalMode = mode
+	}
+	if invariantInput.RunnerSubtype == "" {
+		invariantInput.RunnerSubtype = subtype
+	}
+	if invariantInput.WhyNotWOW == "" {
+		invariantInput.WhyNotWOW = why
+	}
+	if invariantInput.OperatorAction == "" {
+		invariantInput.OperatorAction = action
+	}
+	risks = append(risks, auth.BotFlags...)
+	if auth.AuthenticityLabel == "bot_like" {
+		risks = append(risks, "bot-like activity detected — no automatic entry")
+		score -= 35
+	}
+	if auth.BundleBotDetected {
+		risks = append(risks, "bundle bot detected")
+		score -= 35
+	}
+	if auth.BumpBotDetected {
+		risks = append(risks, "bump bot detected")
+		score -= 45
+	}
+	if auth.SniperBotDetected && auth.SniperShareBuySOL >= 0.70 {
+		risks = append(risks, "high sniper share")
+		score -= 18
+	}
+	if containsAny(auth.BotFlags, "regular interval buys", "structured sell-buy cycle", "repeated identical buy sizes") {
+		risks = append(risks, "mechanical interval buying detected — downgrade")
+		score -= 18
+	}
+	if (vel.VelocityLabel == "strong" || vel.VelocityLabel == "exceptional") && auth.AuthenticityLabel == "organic" {
+		score += 6
+		reasons = append(reasons, "strong organic liquidity velocity")
+	}
+	if vel.RawLiquidityVelocity > vel.OrganicLiquidityVelocity*2 && auth.AuthenticityLabel != "organic" {
+		risks = append(risks, "raw velocity bot-contaminated")
+	}
 	score -= riskPenalty(s)
 	if len(missing) >= 6 {
 		score *= 0.75
@@ -124,14 +197,48 @@ func ScoreEarlyProxy(s model.LiveSnapshot) model.EarlyProxyScore {
 		reasons = append(reasons, "runner-like flow, liquidity unverified")
 	}
 
+	// CALIBRATION_NOTE: velocity weighting is conservative until
+	// live outcome data permits recalibration. Do not tune without
+	// recalibration evidence.
+	velocityBonus := 0.0
+	if s.SolPerTrade5m >= 0.5 {
+		velocityBonus += 10
+	}
+	if s.SolPerTrade5m >= 1.0 {
+		velocityBonus += 10
+	}
+	if s.SolPerUniqueBuyer5m >= 1.0 {
+		velocityBonus += 5
+	}
+	velocityPenalty := 0.0
+	if s.SolPerTrade5m > 0 && s.SolPerTrade5m < 0.05 {
+		velocityPenalty += 15
+	}
+	score += velocityBonus - velocityPenalty
+
 	if hardRugVeto(s) {
+		score = 0
+	}
+	if auth.BundleBotDetected || auth.BumpBotDetected || (auth.SniperBotDetected && auth.SniperShareBuySOL >= 0.70 && s.Top10HolderPct >= 0.85) {
 		score = 0
 	}
 
 	score = clamp(score, 0, 100)
 	band := bandFor(score, risks)
-	if !apexEligible(s) && band == "APEX" {
-		band = "CANDIDATE"
+	if !runnerEligible(s) && band == "RUNNER" && !validUnverifiedBondingRunner(invariantInput) {
+		band = "WATCH"
+	}
+	if band == "RUNNER" && (auth.AuthenticityLabel == "bot_like" || auth.BundleBotDetected || auth.BumpBotDetected || s.ClusteringRowStatus == "full_fallback") {
+		band = "DEAD"
+	}
+	if band == "RUNNER" && containsAny(auth.BotFlags, "regular interval buys", "structured sell-buy cycle", "repeated identical buy sizes") {
+		band = "WATCH"
+	}
+	if band == "RUNNER" && vel.RawLiquidityVelocity > vel.OrganicLiquidityVelocity*2 && auth.AuthenticityLabel != "organic" {
+		band = "WATCH"
+	}
+	if band == "RUNNER" && invariantInput.SignalMode == "unknown" && !validUnverifiedBondingRunner(invariantInput) {
+		band = "WATCH"
 	}
 	band = applyLiquidityEvidenceBandCap(s, band)
 	if unreliableObservedLiquidityProxy(s) && s.LiquidityProxySOL < 5 {
@@ -145,8 +252,8 @@ func ScoreEarlyProxy(s model.LiveSnapshot) model.EarlyProxyScore {
 		}
 	}
 
-	return model.EarlyProxyScore{
-		Eligible:        score >= earlyProxyThreshold,
+	result := model.EarlyProxyScore{
+		Eligible:        band == "RUNNER" && score >= earlyProxyThreshold,
 		Score:           score,
 		Threshold:       earlyProxyThreshold,
 		Band:            band,
@@ -155,6 +262,124 @@ func ScoreEarlyProxy(s model.LiveSnapshot) model.EarlyProxyScore {
 		MissingFields:   dedupe(missing),
 		EvidenceVersion: earlyProxyEvidenceVersion,
 	}
+	return EnforceRunnerInvariants(invariantInput, result)
+}
+
+func EnforceRunnerInvariants(input EarlyProxyInput, result EarlyProxyResult) EarlyProxyResult {
+	result.RiskFlags = dedupe(result.RiskFlags)
+	result.Reasons = dedupe(result.Reasons)
+	band := strings.ToUpper(result.Band)
+	if band == "" {
+		band = "DEAD"
+	}
+
+	addCap := func(msg string) {
+		result.RiskFlags = dedupe(append(result.RiskFlags, msg))
+	}
+	capTo := func(next, msg string) {
+		if bandRank(next) < bandRank(band) {
+			band = next
+			addCap(msg)
+		}
+	}
+	terminal := func(next string, checks ...struct {
+		fail bool
+		msg  string
+	}) {
+		for _, c := range checks {
+			if c.fail {
+				capTo(next, c.msg)
+			}
+		}
+	}
+
+	if band == "APEX" {
+		terminal("RUNNER",
+			struct {
+				fail bool
+				msg  string
+			}{!verifiedPoolDepth(input) && !validBondingLiquidityState(input), "APEX capped: unverified liquidity"},
+			struct {
+				fail bool
+				msg  string
+			}{verifiedPoolDepth(input) && input.RealPoolDepthSOL < 5, "APEX capped: pool depth below 5 SOL"},
+			struct {
+				fail bool
+				msg  string
+			}{input.AuthenticityLabel != "organic" && input.AuthenticityLabel != "mixed", "APEX capped: authenticity not organic/mixed"},
+			struct {
+				fail bool
+				msg  string
+			}{input.MechanicalityScore >= 40, "APEX capped: mechanicality >= 40"},
+			struct {
+				fail bool
+				msg  string
+			}{input.EffectiveBuyers5m < 5, "APEX capped: insufficient effective buyers"},
+			struct {
+				fail bool
+				msg  string
+			}{input.SignalMode == "" || input.SignalMode == "unknown", "APEX capped: unknown signal mode"},
+		)
+	}
+
+	terminal("DEAD",
+		struct {
+			fail bool
+			msg  string
+		}{input.BundleBotDetected, "RUNNER capped: bundle bot detected"},
+		struct {
+			fail bool
+			msg  string
+		}{input.BumpBotDetected, "RUNNER capped: bump bot detected"},
+		struct {
+			fail bool
+			msg  string
+		}{input.ClusteringRowStatus == "full_fallback", "RUNNER capped: full clustering fallback"},
+		struct {
+			fail bool
+			msg  string
+		}{input.Top10HolderPct >= 0.95, "RUNNER capped: extreme top10 concentration"},
+		struct {
+			fail bool
+			msg  string
+		}{hardRugVeto(input), "RUNNER capped: hard rug veto"},
+	)
+	if bandRank(band) >= bandRank("RUNNER") {
+		if input.AuthenticityLabel == "bot_like" {
+			capTo("WATCH", "RUNNER capped: bot-like authenticity")
+		}
+		if (input.SignalMode == "" || input.SignalMode == "unknown") && !validUnverifiedBondingRunner(input) {
+			capTo("WATCH", "RUNNER capped: unknown signal mode")
+		}
+		if mechanicalPattern(input.BotFlags) {
+			if !(input.AuthenticityLabel == "mixed" && input.MechanicalityScore < 40) {
+				capTo("WATCH", "RUNNER capped: mechanical pattern")
+			}
+		}
+		if !verifiedPoolDepth(input) && !validBondingLiquidityState(input) {
+			addCap("unverified pool depth")
+			capTo("WATCH", "RUNNER capped: unverified liquidity")
+		}
+		if !input.LiquidityProxyReliable && !validUnverifiedBondingRunner(input) {
+			capTo("WATCH", "RUNNER capped: liquidity not verified")
+		}
+		if input.AgeSeconds > 1800 && input.RunnerSubtype == "LAUNCH_RUNNER" {
+			capTo("WATCH", "RUNNER capped: old token cannot be launch runner")
+		}
+	}
+	if input.SignalMode == "unknown" && bandRank(band) > bandRank("WATCH") && !validUnverifiedBondingRunner(input) {
+		capTo("WATCH", "RUNNER capped: unknown signal mode")
+	}
+	if band == "APEX" && input.RealPoolDepthSOL == -1 && !validBondingLiquidityState(input) {
+		addCap("unverified pool depth")
+		capTo("RUNNER", "APEX capped: unverified liquidity")
+	}
+
+	result.Band = band
+	result.RiskFlags = dedupe(result.RiskFlags)
+	result.Reasons = dedupe(result.Reasons)
+	result.Eligible = result.Band == "RUNNER" && result.Score >= result.Threshold
+	return result
 }
 
 func missingCoreInputs(s model.LiveSnapshot) []string {
@@ -212,6 +437,7 @@ func observedRiskFlags(s model.LiveSnapshot) []string {
 	}
 	if !verifiedPoolDepth(s) {
 		risks = append(risks, "unverified pool depth")
+		risks = append(risks, "unverified liquidity")
 	}
 	liquiditySOL := liquidityForScoring(s)
 	if liquiditySOL < 5 {
@@ -301,7 +527,7 @@ func verifiedPoolDepth(s model.LiveSnapshot) bool {
 		s.RealPoolDepthSOL >= 0
 }
 
-func apexEligible(s model.LiveSnapshot) bool {
+func runnerEligible(s model.LiveSnapshot) bool {
 	return verifiedPoolDepth(s) &&
 		s.RealPoolDepthSOL >= 5 &&
 		s.EstimatedImpactPct <= 15 &&
@@ -314,31 +540,19 @@ func applyLiquidityEvidenceBandCap(s model.LiveSnapshot, band string) string {
 	if s.LiquidityProxyReliable && s.RealPoolDepthSOL >= 0 {
 		return band
 	}
+	if validUnverifiedBondingRunner(s) {
+		return band
+	}
 	if s.EstimatedImpactPct >= 90 && bandRank(band) > bandRank("WATCH") {
 		return "WATCH"
 	}
 	if s.EstimatedImpactPct >= 50 && bandRank(band) > bandRank("WATCH") {
 		return "WATCH"
 	}
-	if bandRank(band) > bandRank("CANDIDATE") {
-		return "CANDIDATE"
+	if bandRank(band) > bandRank("WATCH") {
+		return "WATCH"
 	}
 	return band
-}
-
-func bandRank(band string) int {
-	switch band {
-	case "APEX":
-		return 4
-	case "CANDIDATE":
-		return 3
-	case "WATCH":
-		return 2
-	case "DEAD":
-		return 1
-	default:
-		return 0
-	}
 }
 
 func qualifiesForUnreliableLiquidityWatch(s model.LiveSnapshot) bool {
@@ -388,13 +602,16 @@ func highImpactWithoutCompensatingEvidence(s model.LiveSnapshot) bool {
 
 func bandFor(score float64, risks []string) string {
 	if score >= 75 && !hasSevereRisk(risks) {
-		return "APEX"
+		return "RUNNER"
 	}
 	if score >= earlyProxyThreshold {
-		return "CANDIDATE"
+		return "RUNNER"
 	}
 	if score >= 45 {
 		return "WATCH"
+	}
+	if score >= 1 {
+		return "REJECT"
 	}
 	return "DEAD"
 }
@@ -408,6 +625,51 @@ func hasSevereRisk(risks []string) bool {
 		}
 	}
 	return false
+}
+
+func bandRank(band string) int {
+	switch strings.ToUpper(band) {
+	case "APEX":
+		return 5
+	case "RUNNER":
+		return 4
+	case "WATCH":
+		return 3
+	case "REJECT":
+		return 2
+	case "DEAD":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func validBondingLiquidityState(s model.LiveSnapshot) bool {
+	src := strings.ToLower(strings.TrimSpace(s.LaunchEvidenceSource))
+	if src == "" {
+		src = strings.ToLower(strings.TrimSpace(s.LiquidityEvidenceSource))
+	}
+	if !(strings.Contains(src, "bonding") || strings.Contains(src, "pump")) {
+		return false
+	}
+	return liquidityForScoring(s) >= 5 || s.LiquidityPoolSOL >= 5 || s.LiquidityProxySOL >= 5
+}
+
+func validUnverifiedBondingRunner(s model.LiveSnapshot) bool {
+	return validBondingLiquidityState(s) &&
+		s.MechanicalityScore < 40 &&
+		len(s.BotFlags) == 0 &&
+		(s.LiquidityVelocityLabel == "strong" || s.LiquidityVelocityLabel == "exceptional" || s.OrganicLiquidityVelocity >= 1)
+}
+
+func mechanicalPattern(flags []string) bool {
+	return containsAny(flags,
+		"regular interval buys",
+		"repeated identical buy sizes",
+		"round-clock aligned buys",
+		"structured sell-buy cycle",
+		"bump bot",
+	)
 }
 
 func appendMissing(dst []string, values ...string) []string {

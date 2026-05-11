@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"memecoin_scorer/internal/filter"
@@ -130,6 +131,11 @@ func toSwapEvent(tx *heliusTx) (model.SwapEvent, bool) {
 		programID = sw.ProgramInfo.Account
 	}
 
+	poolAccount := extractPoolAccount(tx)
+	if poolAccount == "" && strings.EqualFold(tx.Source, "RAYDIUM") {
+		poolAccount = extractWSOLVaultFromTransfers(tx, isBuy)
+	}
+
 	return model.SwapEvent{
 		Signature:        tx.Signature,
 		Slot:             tx.Slot,
@@ -140,7 +146,7 @@ func toSwapEvent(tx *heliusTx) (model.SwapEvent, bool) {
 		SOLAmount:        sol,
 		TokenAmount:      tokenAmount,
 		ProgramID:        programID,
-		PoolAccountAddr:  extractPoolAccount(tx),
+		PoolAccountAddr:  poolAccount,
 		RealPoolDepthSOL: -1, // pc_vault lookup not yet implemented; see docs/real_liquidity_discovery_gap.md
 	}, true
 }
@@ -190,6 +196,8 @@ type heliusTx struct {
 	// Used for best-effort pool account extraction when the enhanced swap event
 	// does not directly expose the AMM pool address.
 	InnerInstructions []heliusInnerInstruction `json:"innerInstructions"`
+	Instructions      []heliusInstruction      `json:"instructions"`
+	TokenTransfers    []heliusTokenTransfer    `json:"tokenTransfers"`
 }
 
 // hasError returns true when transactionError is a non-null JSON value.
@@ -269,16 +277,22 @@ type heliusProg struct {
 }
 
 type heliusInnerInstruction struct {
-	Index        int                  `json:"index"`
-	Instructions []heliusInstruction  `json:"instructions"`
+	Index        int                 `json:"index"`
+	Instructions []heliusInstruction `json:"instructions"`
 }
 
 // heliusInstruction represents one inner CPI instruction.
 // Accounts is a slice of integer indices into the parent heliusTx.Accounts slice.
 type heliusInstruction struct {
-	Accounts  []int  `json:"accounts"`
+	Accounts  []any  `json:"accounts"`
 	Data      string `json:"data"`
 	ProgramId string `json:"programId"`
+}
+
+type heliusTokenTransfer struct {
+	FromTokenAccount string `json:"fromTokenAccount"`
+	ToTokenAccount   string `json:"toTokenAccount"`
+	Mint             string `json:"mint"`
 }
 
 // extractPoolAccount scans inner instructions for known DEX programs and returns
@@ -293,24 +307,63 @@ type heliusInstruction struct {
 // actual reserve depth) requires a separate Solana RPC call.
 // See docs/real_liquidity_discovery_gap.md.
 func extractPoolAccount(tx *heliusTx) string {
+	for _, instr := range tx.Instructions {
+		if instr.ProgramId == raydiumAMMV4 {
+			// Helius enhanced transactions expose top-level instruction accounts
+			// as pubkeys. Raydium AMM V4 account[1] is the AMM state account.
+			if acct := accountRef(tx, instr.Accounts, 1); acct != "" {
+				return acct
+			}
+		}
+	}
 	for _, inner := range tx.InnerInstructions {
 		for _, instr := range inner.Instructions {
 			switch instr.ProgramId {
 			case raydiumAMMV4:
 				if len(instr.Accounts) > 0 {
-					idx := instr.Accounts[0]
-					if idx >= 0 && idx < len(tx.Accounts) {
-						return tx.Accounts[idx]
+					if acct := accountRef(tx, instr.Accounts, 0); acct != "" {
+						return acct
 					}
 				}
 			case pumpFun:
 				if len(instr.Accounts) > 3 {
-					idx := instr.Accounts[3]
-					if idx >= 0 && idx < len(tx.Accounts) {
-						return tx.Accounts[idx]
+					if acct := accountRef(tx, instr.Accounts, 3); acct != "" {
+						return acct
 					}
 				}
 			}
+		}
+	}
+	return ""
+}
+
+func accountRef(tx *heliusTx, refs []any, pos int) string {
+	if pos < 0 || pos >= len(refs) {
+		return ""
+	}
+	switch v := refs[pos].(type) {
+	case string:
+		return v
+	case float64:
+		idx := int(v)
+		if idx >= 0 && idx < len(tx.Accounts) {
+			return tx.Accounts[idx]
+		}
+	}
+	return ""
+}
+
+func extractWSOLVaultFromTransfers(tx *heliusTx, isBuy bool) string {
+	const wsolMint = "So11111111111111111111111111111111111111112"
+	for _, tr := range tx.TokenTransfers {
+		if tr.Mint != wsolMint {
+			continue
+		}
+		if isBuy && tr.ToTokenAccount != "" {
+			return tr.ToTokenAccount
+		}
+		if !isBuy && tr.FromTokenAccount != "" {
+			return tr.FromTokenAccount
 		}
 	}
 	return ""

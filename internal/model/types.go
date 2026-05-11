@@ -2,6 +2,102 @@ package model
 
 import "time"
 
+type TokenMode string
+
+const (
+	TokenModeLaunch    TokenMode = "launch"
+	TokenModeBonding   TokenMode = "bonding"
+	TokenModeMigration TokenMode = "migration"
+	TokenModeRevival   TokenMode = "revival"
+	TokenModeUnknown   TokenMode = "unknown"
+)
+
+type LaunchConfidence string
+
+const (
+	LaunchConfidenceExact    LaunchConfidence = "exact"
+	LaunchConfidenceInferred LaunchConfidence = "inferred"
+	LaunchConfidenceUnknown  LaunchConfidence = "unknown"
+)
+
+type SetupMode string
+
+const (
+	SetupLaunchWOW           SetupMode = "LAUNCH_WOW"
+	SetupBondingWOW          SetupMode = "BONDING_WOW"
+	SetupMigrationWOW        SetupMode = "MIGRATION_WOW"
+	SetupRevivalWOW          SetupMode = "REVIVAL_WOW"
+	SetupManipulatedMomentum SetupMode = "MANIPULATED_MOMENTUM"
+	SetupWatch               SetupMode = "WATCH"
+	SetupAvoid               SetupMode = "AVOID"
+	SetupDead                SetupMode = "DEAD"
+)
+
+type OperatorAction string
+
+const (
+	ActionNoTrade      OperatorAction = "NO_TRADE"
+	ActionWatch1M      OperatorAction = "WATCH_1M"
+	ActionWatch5M      OperatorAction = "WATCH_5M"
+	ActionPaperLog     OperatorAction = "PAPER_LOG"
+	ActionEnterSmall   OperatorAction = "ENTER_SMALL"
+	ActionEnterAllowed OperatorAction = "ENTER_ALLOWED"
+	ActionExitAvoid    OperatorAction = "EXIT_AVOID"
+)
+
+type AuthenticityCoverage string
+
+const (
+	CoverageExact       AuthenticityCoverage = "exact"
+	CoverageApproximate AuthenticityCoverage = "approximate"
+	CoverageUnavailable AuthenticityCoverage = "unavailable"
+)
+
+type AuthenticityResult struct {
+	BundleBot           bool                 `json:"bundle_bot"`
+	BundleBotConfidence AuthenticityCoverage `json:"bundle_bot_confidence"`
+	SniperBot           bool                 `json:"sniper_bot"`
+	SniperBotConfidence AuthenticityCoverage `json:"sniper_bot_confidence"`
+	BumpBot             bool                 `json:"bump_bot"`
+	BumpBotConfidence   AuthenticityCoverage `json:"bump_bot_confidence"`
+	MechanicalRhythm    bool                 `json:"mechanical_rhythm"`
+	IdenticalBuySizes   bool                 `json:"identical_buy_sizes"`
+	Flags               []string             `json:"flags"`
+	Score               float64              `json:"score"`
+	Severity            string               `json:"severity"`
+}
+
+type SetupResult struct {
+	Mode              SetupMode      `json:"mode"`
+	ScoreTier         string         `json:"score_tier"`
+	Action            OperatorAction `json:"action"`
+	ProxyScore        float64        `json:"proxy_score"`
+	AuthenticityScore float64        `json:"authenticity_score"`
+	VelocityScore     float64        `json:"velocity_score"`
+	Reasons           []string       `json:"reasons"`
+	Blockers          []string       `json:"blockers"`
+	Invalidation      []string       `json:"invalidation"`
+}
+
+type BuyEvent struct {
+	Mint      string
+	Wallet    string
+	Block     uint64
+	Timestamp time.Time
+	SolAmount float64
+	TokenQty  float64
+}
+
+type WalletEvent struct {
+	Mint      string
+	Wallet    string
+	Block     uint64
+	Timestamp time.Time
+	IsBuy     bool
+	TokenQty  float64 // signed: + for buy, - for sell
+	SolAmount float64
+}
+
 // SwapEvent is a normalised Solana swap extracted from a Helius webhook payload.
 // One SwapEvent represents a single SOL-side trade (buy or sell) for one token mint.
 type SwapEvent struct {
@@ -27,6 +123,17 @@ type SwapEvent struct {
 	// This field is -1 in all current paths; it exists as the integration point
 	// for a future Solana RPC depth lookup routed through PoolAccountAddr.
 	RealPoolDepthSOL float64
+}
+
+type TokenTradeEvent struct {
+	Signature   string    `json:"signature,omitempty"`
+	Slot        uint64    `json:"slot"`
+	BlockTime   time.Time `json:"block_time"`
+	Wallet      string    `json:"wallet"`
+	Side        string    `json:"side"`
+	SOLAmount   float64   `json:"sol_amount"`
+	TokenAmount float64   `json:"token_amount"`
+	IsCreator   bool      `json:"is_creator"`
 }
 
 // GateResult holds the pass/fail result for one of the 7 success gates.
@@ -137,13 +244,24 @@ type ShadowFeatureInputs struct {
 // All fields are computed at snapshot time from the store's internal state.
 // No mutable references are held; it is safe to pass by value.
 type TokenSnapshot struct {
-	Mint             string    `json:"mint"`
-	FirstSeenAt      time.Time `json:"first_seen_at"`
-	LastEventAt      time.Time `json:"last_event_at"`
-	UniqueBuyerCount int       `json:"unique_buyer_count"`
-	TotalBuySOL      float64   `json:"total_buy_sol"`
-	TotalSellSOL     float64   `json:"total_sell_sol"`
-	SellTradeCount   int       `json:"sell_trade_count"`
+	Mint                 string           `json:"mint"`
+	DeployerAddress      string           `json:"deployer_address,omitempty"`
+	FirstSeenSlot        uint64           `json:"first_seen_slot,omitempty"`
+	CreatorWallet        string           `json:"creator_wallet,omitempty"`
+	FirstObservedAt      time.Time        `json:"first_observed_at"`
+	ObservedAgeSeconds   float64          `json:"observed_age_seconds"`
+	ObservedFirstSeenAt  time.Time        `json:"observed_first_seen_at"`
+	LaunchDetectedAt     *time.Time       `json:"launch_detected_at,omitempty"`
+	LaunchSlot           uint64           `json:"launch_slot,omitempty"`
+	LaunchAgeSeconds     *float64         `json:"launch_age_seconds,omitempty"`
+	LaunchConfidence     LaunchConfidence `json:"launch_confidence"`
+	LaunchEvidenceSource string           `json:"launch_evidence_source"`
+	FirstSeenAt          time.Time        `json:"first_seen_at"`
+	LastEventAt          time.Time        `json:"last_event_at"`
+	UniqueBuyerCount     int              `json:"unique_buyer_count"`
+	TotalBuySOL          float64          `json:"total_buy_sol"`
+	TotalSellSOL         float64          `json:"total_sell_sol"`
+	SellTradeCount       int              `json:"sell_trade_count"`
 	// BuyersLast1m is the count of distinct buyer wallets in the most recent 1 minute.
 	BuyersLast1m int `json:"buyers_last1m"`
 	// BuyersLast5m is the count of distinct buyer wallets in the most recent 5 minutes.
@@ -258,6 +376,10 @@ type TokenSnapshot struct {
 	// ShadowFeatures is intentionally not serialized. It carries observed,
 	// availability-marked live features for the shadow validated scorer bridge.
 	ShadowFeatures ShadowFeatureInputs `json:"-"`
+	TradeHistory   []TokenTradeEvent   `json:"-"`
+
+	// MigrationEventAt is nil until a verified migration event is observed.
+	MigrationEventAt *time.Time `json:"migration_event_at,omitempty"`
 }
 
 // LiveSnapshot extends TokenSnapshot with a live decision classification.
@@ -367,9 +489,39 @@ type LiveSnapshot struct {
 	NoTradeReason string `json:"no_trade_reason"`
 	// Shadow is the evidence-bearing offline-scorer reconciliation result.
 	Shadow ShadowScoreResult `json:"shadow"`
-	// EarlyProxy is a decision-time runner-formation proxy inspired by the
-	// historically validated Dune scorer. It uses only currently observable live fields.
+	// EarlyProxy is internal scoring only. Dashboard must use Setup.Mode.
 	EarlyProxy EarlyProxyScore `json:"early_proxy"`
+
+	TokenMode                TokenMode          `json:"token_mode"`
+	Authenticity             AuthenticityResult `json:"authenticity"`
+	Setup                    SetupResult        `json:"setup"`
+	SolPerTrade5m            float64            `json:"sol_per_trade_5m"`
+	SolPerUniqueBuyer5m      float64            `json:"sol_per_unique_buyer_5m"`
+	BondingCurveProgressPct  float64            `json:"bonding_curve_progress_pct,omitempty"`
+	BondingVelocitySolPerMin float64            `json:"bonding_velocity_sol_per_min,omitempty"`
+	SOLPerTrade5m            float64            `json:"-"`
+
+	BotFlags                 []string `json:"bot_flags"`
+	AuthenticityLabel        string   `json:"authenticity_label"`
+	MechanicalityScore       float64  `json:"mechanicality_score"`
+	BundleBotDetected        bool     `json:"bundle_bot_detected"`
+	BundleBotConfidence      string   `json:"bundle_bot_confidence"`
+	SniperBotDetected        bool     `json:"sniper_bot_detected"`
+	SniperBotConfidence      string   `json:"sniper_bot_confidence"`
+	SniperShareEarlyBuySOL   float64  `json:"sniper_share_early_buy_sol"`
+	BumpBotDetected          bool     `json:"bump_bot_detected"`
+	BumpBotScore             float64  `json:"bump_bot_score"`
+	BumpBotWallets           []string `json:"bump_bot_wallets,omitempty"`
+	LiquidityVelocityLabel   string   `json:"liquidity_velocity_label"`
+	SOLPerBuyer5m            float64  `json:"sol_per_buyer_5m"`
+	VSolPerTrade             float64  `json:"vsol_per_trade"`
+	VSolPerMinute            float64  `json:"vsol_per_minute"`
+	RawLiquidityVelocity     float64  `json:"raw_liquidity_velocity"`
+	OrganicLiquidityVelocity float64  `json:"organic_liquidity_velocity"`
+	SignalMode               string   `json:"signal_mode"`
+	RunnerSubtype            string   `json:"runner_subtype"`
+	WhyNotWOW                string   `json:"why_not_wow"`
+	OperatorAction           string   `json:"operator_action"`
 
 	PriorityLabel             string `json:"priority_label"`
 	ActionabilityLabel        string `json:"actionability_label"`

@@ -73,6 +73,33 @@ func TestStore_DifferentSignatures_BothCounted(t *testing.T) {
 	}
 }
 
+func TestStore_FirstObservedBuyerIsNotCreatorWithoutLaunchEvidence(t *testing.T) {
+	s := state.New()
+	ev := makeBuy("sig_creator_guard", "firstBuyer", testMint, epoch, 1.0)
+	ev.Slot = 123
+	s.Apply(ev)
+
+	snap, ok := s.Snapshot(testMint)
+	if !ok {
+		t.Fatal("expected snapshot")
+	}
+	if snap.CreatorWallet != "" {
+		t.Fatalf("creator_wallet=%q, first observed buyer must not be inferred as creator", snap.CreatorWallet)
+	}
+	if len(snap.TradeHistory) != 1 {
+		t.Fatalf("trade_history len=%d, want 1", len(snap.TradeHistory))
+	}
+	if snap.TradeHistory[0].IsCreator {
+		t.Fatalf("first observed buyer was marked creator without creator evidence")
+	}
+	if snap.FirstObservedAt.IsZero() {
+		t.Fatal("first_observed_at should be recorded")
+	}
+	if snap.LaunchEvidenceSource != "unknown" || snap.LaunchSlot != 0 || snap.LaunchDetectedAt != nil || snap.LaunchConfidence != model.LaunchConfidenceUnknown {
+		t.Fatalf("launch evidence should remain empty without explicit launch proof: %+v", snap)
+	}
+}
+
 // ---- Unique buyer counting ----
 
 func TestStore_UniqueBuyerCounting(t *testing.T) {

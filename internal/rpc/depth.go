@@ -81,6 +81,15 @@ func (d *DepthClient) FetchDepth(ctx context.Context, poolAccountAddr string) De
 		return UnavailableDepth
 	}
 
+	// Some upstream enhanced swap payloads expose the SOL-side vault directly
+	// rather than the AMM state account. Prefer a direct SPL token balance when
+	// the supplied account is already a token account; AMM accounts fall through
+	// to getAccountInfo layout decoding below.
+	if sol, err := d.rpc.GetTokenAccountBalance(ctx, poolAccountAddr); err == nil {
+		d.depthCache.Store(poolAccountAddr, cachedDepth{sol: sol, at: time.Now()})
+		return DepthResult{SOL: sol, Source: LiquiditySourcePCVault}
+	}
+
 	pcVault, err := d.resolvePCVault(ctx, poolAccountAddr)
 	if err != nil || pcVault == "" {
 		return UnavailableDepth

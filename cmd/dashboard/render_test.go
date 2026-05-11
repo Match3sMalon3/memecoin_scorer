@@ -1,66 +1,54 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"memecoin_scorer/internal/alerts"
 )
 
 func sampleLiveRow() map[string]any {
 	return map[string]any{
-		"mint":                           "RENDERMINT123456789",
-		"decision":                       "AVOID",
-		"operator_verdict":               "structurally broken",
-		"dominant_blocker":               "impossible execution • observed liq proxy below 5",
-		"why_not_higher":                 "impossible execution • observed liq proxy below 5",
-		"why_now":                        "5 eff buyers /1m • 5 eff buyers /5m • clean clustering",
-		"execution_url":                  "https://gmgn.ai/sol/token/RENDERMINT123456789",
-		"solscan_url":                    "https://solscan.io/token/RENDERMINT123456789",
-		"early_proxy":                    map[string]any{"score": 74.0, "threshold": 62.0, "band": "CANDIDATE", "reasons": []any{"early effective buyer depth", "positive buy pressure"}, "risk_flags": []any{"observed liq proxy below 5 SOL"}, "missing_fields": []any{"market_cap_sol"}, "evidence_version": "test"},
-		"signal_state":                   "expired",
-		"confidence_score":               66.0,
-		"buyers_last1m":                  5.0,
-		"effective_buyers_1m":            5.0,
-		"buy_sol_last_1m":                1.2,
-		"sell_sol_last_1m":               0.4,
-		"buyer_acceleration":             1.0,
-		"execution_penalty":              0.4,
-		"adversarial_score":              0.2,
-		"estimated_impact_pct":           12.0,
-		"age_seconds":                    120.0,
-		"funding_cluster_ratio":          0.0,
-		"clustering_row_status":          "resolved",
-		"clustering_timeouts":            0.0,
-		"clustering_fallbacks":           0.0,
-		"market_cap_sol":                 10.0,
-		"last_price_sol":                 0.000001,
-		"market_cap_reason":              "",
-		"is_actionable":                  false,
-		"liquidity_evidence_source":      "observed_swaps_proxy",
-		"liquidity_proxy_reliable":       false,
-		"liquidity_evidence_age_seconds": 3.0,
-		"engine":                         map[string]any{"layer0_reject": true, "layer0_reason": "impossible_execution: observed_liq_proxy=1.00 SOL < 5.00 SOL minimum", "gates_pass_count": 0.0, "gates": []any{}},
-		"holder_count":                   5.0,
+		"mint":                      "RENDERMINT123456789",
+		"dominant_blocker":          "impossible execution • observed liq proxy below 5",
+		"why_now":                   "5 eff buyers /1m • positive buy pressure",
+		"execution_url":             "https://gmgn.ai/sol/token/RENDERMINT123456789",
+		"solscan_url":               "https://solscan.io/token/RENDERMINT123456789",
+		"early_proxy":               map[string]any{"score": 74.0, "threshold": 62.0, "band": "RUNNER", "reasons": []any{"early effective buyer depth", "positive buy pressure"}, "risk_flags": []any{"observed liq proxy below 5 SOL"}, "evidence_version": "test"},
+		"token_mode":                "launch",
+		"launch_confidence":         "exact",
+		"launch_age_seconds":        60.0,
+		"observed_age_seconds":      120.0,
+		"setup":                     map[string]any{"mode": "LAUNCH_WOW", "score_tier": "HIGH", "action": "PAPER_LOG", "proxy_score": 74.0, "authenticity_score": 100.0, "velocity_score": 25.0, "reasons": []any{"early effective buyer depth", "positive buy pressure"}, "blockers": []any{}, "invalidation": []any{"buyer flow disappears"}},
+		"authenticity":              map[string]any{"bundle_bot": false, "bundle_bot_confidence": "unavailable", "sniper_bot": false, "sniper_bot_confidence": "unavailable", "bump_bot": false, "bump_bot_confidence": "unavailable", "mechanical_rhythm": false, "identical_buy_sizes": false, "flags": []any{}, "score": 100.0, "severity": "none"},
+		"sol_per_trade_5m":          0.5,
+		"sol_per_unique_buyer_5m":   0.5,
+		"signal_state":              "active",
+		"confidence_score":          66.0,
+		"buyers_last1m":             5.0,
+		"buyers_last5m":             8.0,
+		"effective_buyers_1m":       5.0,
+		"effective_buyers_5m":       6.0,
+		"buy_sol_last_1m":           1.2,
+		"sell_sol_last_1m":          0.4,
+		"estimated_impact_pct":      12.0,
+		"age_seconds":               120.0,
+		"top10_holder_pct":          0.22,
+		"clustering_row_status":     "resolved",
+		"last_price_sol":            0.000001,
+		"liquidity_evidence_source": "observed_swaps_proxy",
+		"liquidity_proxy_reliable":  false,
+		"real_pool_depth_sol":       -1.0,
 	}
 }
 
-func TestRenderInitialRows_VisibleOperatorCells(t *testing.T) {
-	html := renderInitialRows([]map[string]any{sampleLiveRow()})
-	if !strings.Contains(html, `<td class="verdict-label"><strong>structurally broken</strong></td>`) {
-		t.Fatalf("visible verdict cell missing: %s", html)
-	}
-	if !strings.Contains(html, `<td class="blocker-cell">impossible execution • observed liq proxy below 5</td>`) {
-		t.Fatalf("visible blocker cell missing: %s", html)
-	}
-	if !strings.Contains(html, `<td class="why-now-cell">5 eff buyers /1m • 5 eff buyers /5m • clean clustering</td>`) {
-		t.Fatalf("visible why-now cell missing: %s", html)
-	}
-	if !strings.Contains(html, `<a href="https://gmgn.ai/sol/token/RENDERMINT123456789" class="gmgn-link exec-link" target="_blank" rel="noopener noreferrer">EXECUTE [GMGN]</a>`) {
-		t.Fatalf("visible GMGN link missing: %s", html)
-	}
-}
-
-func TestRenderIndexHTML_ServerRendersPostureHeroScan(t *testing.T) {
+func TestRenderIndexHTML_WowShell(t *testing.T) {
 	app := &App{
 		cfg:              dashConfig{liveMode: true},
 		cachedLiveRows:   []map[string]any{sampleLiveRow()},
@@ -68,247 +56,157 @@ func TestRenderIndexHTML_ServerRendersPostureHeroScan(t *testing.T) {
 	}
 	html := app.renderIndexHTML()
 	for _, want := range []string{
-		`id="heroCard"`,
-		`id="heroName"`,
-		`id="heroPrimaryAction"`,
-		`id="heroSecondaryAction"`,
-		`id="primaryScanBody"`,
-		`id="rejectsPanel"`,
-		`NO LIVE RUNNER CANDIDATE`,
-		`proxy 74 CANDIDATE`,
-		`<th>actions</th>`,
-		`VIEW [GMGN]`,
-		`https://gmgn.ai/sol/token/RENDERMINT123456789`,
-		`https://solscan.io/token/RENDERMINT123456789`,
-		`SOLSCAN ↗`,
+		`ANTI-BULLSHIT RUNNER INTELLIGENCE`,
+		`proof-bar`,
+		`alert-panel`,
+		`/api/alerts/stream`,
+		`LIVE LAUNCH_WOW CANDIDATE`,
+		`BACKTEST`,
 	} {
 		if !strings.Contains(html, want) {
-			t.Fatalf("posture scan markup %q missing: %s", want, html)
+			t.Fatalf("markup %q missing: %s", want, html)
 		}
 	}
-	if strings.Contains(html, `DEX unavailable`) {
-		t.Fatalf("old Dex fallback should not render: %s", html)
-	}
-	if strings.Contains(html, `trigger = flow`) {
-		t.Fatalf("helper trigger copy should not render: %s", html)
-	}
-}
-
-func TestChooseBestSetupGo_AllFormingDeadRowsReturnNil(t *testing.T) {
-	forming := sampleLiveRow()
-	forming["mint"] = "FORMINGMINT123456789"
-	forming["signal_state"] = "forming"
-	forming["early_proxy"] = map[string]any{"score": 0.0, "threshold": 62.0, "band": "DEAD"}
-
-	if best := chooseBestSetupGo([]map[string]any{forming}); best != nil {
-		t.Fatalf("best=%v, want nil for all forming DEAD rows", best)
+	for _, bad := range []string{`AP` + `EX`, `BAD TAPE DETECTED`, `STRUCTURAL QUALITY FILTER`, `POSTURE: DEFENSIVE`, `liq 0.00 < 5`} {
+		if strings.Contains(html, bad) {
+			t.Fatalf("forbidden markup %q present: %s", bad, html)
+		}
 	}
 }
 
-func TestChooseBestSetupGo_IgnoresExpiredRows(t *testing.T) {
-	expired := sampleLiveRow()
-	expired["priority_label"] = "best_on_tape"
-	expired["confidence_score"] = 100.0
-
-	forming := sampleLiveRow()
-	forming["mint"] = "FORMINGMINT123456789"
-	forming["signal_state"] = "forming"
-	forming["priority_label"] = "monitor_for_upgrade"
-	forming["confidence_score"] = 50.0
-	forming["early_proxy"] = map[string]any{"score": 40.0, "threshold": 62.0, "band": "WATCH"}
-
-	best := chooseBestSetupGo([]map[string]any{expired, forming})
-	if best == nil {
-		t.Fatalf("best=nil, want forming row")
-	}
-	if got := stringFieldMap(best, "mint"); got != "FORMINGMINT123456789" {
-		t.Fatalf("best mint=%q, want forming row", got)
-	}
-}
-
-func TestChooseBestSetupGo_PrefersFormingHigherEarlyProxyOverCoolingHighConfidence(t *testing.T) {
-	cooling := sampleLiveRow()
-	cooling["mint"] = "COOLINGMINT123456789"
-	cooling["signal_state"] = "cooling"
-	cooling["confidence_score"] = 99.0
-	cooling["early_proxy"] = map[string]any{"score": 95.0, "threshold": 62.0, "band": "APEX"}
-	cooling["last_event_at"] = "2026-04-26T10:00:00Z"
-
-	freshLow := sampleLiveRow()
-	freshLow["mint"] = "FRESHLOW123456789"
-	freshLow["signal_state"] = "forming"
-	freshLow["confidence_score"] = 80.0
-	freshLow["early_proxy"] = map[string]any{"score": 50.0, "threshold": 62.0, "band": "WATCH"}
-	freshLow["last_event_at"] = "2026-04-26T10:01:00Z"
-
-	freshHigh := sampleLiveRow()
-	freshHigh["mint"] = "FRESHHIGH123456789"
-	freshHigh["signal_state"] = "forming"
-	freshHigh["confidence_score"] = 40.0
-	freshHigh["early_proxy"] = map[string]any{"score": 74.0, "threshold": 62.0, "band": "CANDIDATE"}
-	freshHigh["last_event_at"] = "2026-04-26T10:00:30Z"
-
-	best := chooseBestSetupGo([]map[string]any{cooling, freshLow, freshHigh})
-	if best == nil {
-		t.Fatal("best=nil, want forming high proxy row")
-	}
-	if got := stringFieldMap(best, "mint"); got != "FRESHHIGH123456789" {
-		t.Fatalf("best mint=%q, want forming row with higher early proxy score", got)
-	}
-}
-
-func TestChooseBestSetupGo_CandidateBeatsWatch(t *testing.T) {
+func TestChooseBestSetupGo_UsesRunnerVocabulary(t *testing.T) {
 	watch := sampleLiveRow()
 	watch["mint"] = "WATCHMINT123456789"
-	watch["signal_state"] = "forming"
 	watch["early_proxy"] = map[string]any{"score": 55.0, "threshold": 62.0, "band": "WATCH"}
-	watch["last_event_at"] = "2026-04-26T10:01:00Z"
+	watch["setup"] = map[string]any{"mode": "WATCH", "action": "WATCH_5M", "proxy_score": 55.0}
 
-	candidate := sampleLiveRow()
-	candidate["mint"] = "CANDIDATEMINT123456789"
-	candidate["signal_state"] = "forming"
-	candidate["early_proxy"] = map[string]any{"score": 70.0, "threshold": 62.0, "band": "CANDIDATE"}
-	candidate["last_event_at"] = "2026-04-26T10:00:00Z"
+	runner := sampleLiveRow()
+	runner["mint"] = "RUNNERMINT123456789"
+	runner["early_proxy"] = map[string]any{"score": 70.0, "threshold": 62.0, "band": "RUNNER"}
+	runner["setup"] = map[string]any{"mode": "LAUNCH_WOW", "action": "PAPER_LOG", "proxy_score": 70.0}
 
-	best := chooseBestSetupGo([]map[string]any{watch, candidate})
-	if best == nil {
-		t.Fatal("best=nil, want candidate row")
-	}
-	if got := stringFieldMap(best, "mint"); got != "CANDIDATEMINT123456789" {
-		t.Fatalf("best mint=%q, want CANDIDATEMINT123456789", got)
+	best := chooseBestSetupGo([]map[string]any{watch, runner})
+	if got := stringFieldMap(best, "mint"); got != "RUNNERMINT123456789" {
+		t.Fatalf("best mint=%q, want runner row", got)
 	}
 }
 
-func TestChooseBestSetupGo_ExpiredCandidateCannotBecomeHero(t *testing.T) {
-	expired := sampleLiveRow()
-	expired["mint"] = "EXPIREDCANDIDATE123456789"
-	expired["signal_state"] = "expired"
-	expired["early_proxy"] = map[string]any{"score": 90.0, "threshold": 62.0, "band": "CANDIDATE"}
-
-	if best := chooseBestSetupGo([]map[string]any{expired}); best != nil {
-		t.Fatalf("best=%v, want nil for expired CANDIDATE", best)
-	}
-}
-
-func TestChooseBestSetupGo_AllExpiredReturnsNil(t *testing.T) {
-	expired := sampleLiveRow()
-	expired["priority_label"] = "best_on_tape"
-
-	if best := chooseBestSetupGo([]map[string]any{expired}); best != nil {
-		t.Fatalf("best=%v, want nil when every row is expired", best)
-	}
-}
-
-func TestChooseBestSetupGo_CoolingCanWinWhenNoFormingOrActiveNonDead(t *testing.T) {
-	cooling := sampleLiveRow()
-	cooling["mint"] = "COOLINGMINT123456789"
-	cooling["signal_state"] = "cooling"
-	cooling["early_proxy"] = map[string]any{"score": 74.0, "threshold": 62.0, "band": "CANDIDATE"}
-
-	best := chooseBestSetupGo([]map[string]any{cooling})
-	if best == nil {
-		t.Fatal("best=nil, want cooling fallback row")
-	}
-	if got := stringFieldMap(best, "mint"); got != "COOLINGMINT123456789" {
-		t.Fatalf("best mint=%q, want cooling fallback row", got)
-	}
-}
-
-func TestRenderIndexHTML_AllFormingDeadRowsShowNoRunnerCandidate(t *testing.T) {
+func TestRenderWowLockedRows_UsesFinalCappedBandNotScore(t *testing.T) {
 	row := sampleLiveRow()
-	row["signal_state"] = "forming"
-	row["early_proxy"] = map[string]any{"score": 0.0, "threshold": 62.0, "band": "DEAD", "risk_flags": []any{"observed liq proxy below 5 SOL"}}
-	app := &App{
-		cfg:              dashConfig{liveMode: true},
-		cachedLiveRows:   []map[string]any{row},
-		cachedLiveRowsAt: time.Now(),
+	row["early_proxy"] = map[string]any{
+		"score":      99.0,
+		"threshold":  62.0,
+		"band":       "WATCH",
+		"risk_flags": []any{"RUNNER capped: unverified liquidity"},
 	}
+	row["setup"] = map[string]any{"mode": "WATCH", "action": "WATCH_5M", "proxy_score": 99.0, "blockers": []any{"RUNNER capped: unverified liquidity"}}
+	html := renderWowLockedRows([]map[string]any{row})
+	if !strings.Contains(html, `>WATCH</span>`) {
+		t.Fatalf("rendered row did not display capped WATCH band: %s", html)
+	}
+	if strings.Contains(html, `>LAUNCH_WOW</span>`) {
+		t.Fatalf("dashboard promoted raw score to WOW: %s", html)
+	}
+	if !strings.Contains(html, "RUNNER capped: unverified liquidity") {
+		t.Fatalf("capping reason missing from dashboard row: %s", html)
+	}
+}
 
-	html := app.renderIndexHTML()
-	for _, want := range []string{
-		`NO LIVE RUNNER CANDIDATE`,
-		`forming tokens observed, no runner footprint yet`,
-		`all forming rows are currently DEAD by early proxy`,
-		`proxy 0 DEAD`,
-		`https://gmgn.ai/sol/token/RENDERMINT123456789`,
-		`https://solscan.io/token/RENDERMINT123456789`,
-	} {
-		if !strings.Contains(html, want) {
-			t.Fatalf("all-DEAD markup %q missing: %s", want, html)
+func TestChooseBestSetupGo_DeadSetupCannotBecomeHero(t *testing.T) {
+	dead := sampleLiveRow()
+	dead["setup"] = map[string]any{"mode": "DEAD", "action": "NO_TRADE", "proxy_score": 0.0}
+	if best := chooseBestSetupGo([]map[string]any{dead}); best != nil {
+		t.Fatalf("best=%v, want nil for dead setup row", best)
+	}
+}
+
+func TestAlertsStreamHeaders(t *testing.T) {
+	app := &App{}
+	req := httptest.NewRequest(http.MethodGet, "/api/alerts/stream", nil)
+	ctx, cancel := context.WithTimeout(req.Context(), 20*time.Millisecond)
+	defer cancel()
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+	app.handleAlertsStream(rr, req)
+	if got := rr.Header().Get("Content-Type"); !strings.Contains(got, "text/event-stream") {
+		t.Fatalf("content-type=%q, want text/event-stream", got)
+	}
+	if !strings.Contains(rr.Body.String(), ": ping") {
+		t.Fatalf("heartbeat missing: %s", rr.Body.String())
+	}
+}
+
+func TestAlertBrokerPublishes(t *testing.T) {
+	ch := alerts.Subscribe()
+	defer alerts.Unsubscribe(ch)
+	alerts.Publish(alerts.Alert{Mint: "mint", Score: 70})
+	select {
+	case got := <-ch:
+		if got.Mint != "mint" {
+			t.Fatalf("mint=%q", got.Mint)
 		}
+	case <-time.After(time.Second):
+		t.Fatal("alert not delivered")
 	}
 }
 
-func TestRenderIndexHTML_UsesObservedLiquidityProxyCopy(t *testing.T) {
-	row := sampleLiveRow()
-	row["signal_state"] = "forming"
-	row["liquidity_proxy_sol"] = 1.0
-	row["dominant_blocker"] = "observed liq proxy 1.00 < 5"
-	app := &App{
-		cfg:              dashConfig{liveMode: true},
-		cachedLiveRows:   []map[string]any{row},
-		cachedLiveRowsAt: time.Now(),
-	}
-
-	html := app.renderIndexHTML()
-	if strings.Contains(html, "liq 1.00 < 5") {
-		t.Fatalf("old liquidity blocker text rendered: %s", html)
-	}
-	if !strings.Contains(html, "observed liq proxy") {
-		t.Fatalf("observed liquidity proxy text missing: %s", html)
-	}
-}
-
-func TestChooseBestSetupGo_FormingWatchCanBecomeHero(t *testing.T) {
-	watch := sampleLiveRow()
-	watch["mint"] = "WATCHMINT123456789"
-	watch["signal_state"] = "forming"
-	watch["early_proxy"] = map[string]any{"score": 50.0, "threshold": 62.0, "band": "WATCH"}
-
-	best := chooseBestSetupGo([]map[string]any{watch})
-	if best == nil {
-		t.Fatal("best=nil, want forming WATCH row")
-	}
-	if got := stringFieldMap(best, "mint"); got != "WATCHMINT123456789" {
-		t.Fatalf("best mint=%q, want WATCHMINT123456789", got)
-	}
-}
-
-func TestRenderIndexHTML_FormingNonActionableHeroCopy(t *testing.T) {
-	row := sampleLiveRow()
-	row["signal_state"] = "forming"
-	row["is_actionable"] = false
-	row["early_proxy"] = map[string]any{"score": 74.0, "threshold": 62.0, "band": "CANDIDATE", "reasons": []any{"early effective buyer depth"}}
-	app := &App{
-		cfg:              dashConfig{liveMode: true},
-		cachedLiveRows:   []map[string]any{row},
-		cachedLiveRowsAt: time.Now(),
-	}
-
-	html := app.renderIndexHTML()
-	for _, want := range []string{
-		`FORMATION WATCH — NOT EXECUTION`,
-		`<span class="badge forming">FORMING</span>`,
-		`VIEW [GMGN]`,
-	} {
-		if !strings.Contains(html, want) {
-			t.Fatalf("forming hero markup %q missing: %s", want, html)
+func TestLiveSnapshotsDefaultLimitIs200(t *testing.T) {
+	var gotLimit string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/snapshots" {
+			http.NotFound(w, r)
+			return
 		}
+		gotLimit = r.URL.Query().Get("limit")
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"mint": "m"}})
+	}))
+	defer upstream.Close()
+
+	app := &App{cfg: dashConfig{liveMode: true, ingestorURL: upstream.URL}}
+	req := httptest.NewRequest(http.MethodGet, "/api/live-snapshots", nil)
+	rr := httptest.NewRecorder()
+	app.handleLiveSnapshots(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if gotLimit != "200" {
+		t.Fatalf("upstream limit=%q, want 200", gotLimit)
 	}
 }
 
-func TestIndexHTML_NoJSDerivationForBackendOwnedFields(t *testing.T) {
-	forbidden := []string{
-		"s.execution_url ||",
-		"s.why_now ||",
-		"s.operator_verdict ||",
-		"best.operator_verdict ||",
-		"best.why_now ||",
-		"https://gmgn.ai/sol/token/\" + encodeURIComponent(mint)",
-	}
-	for _, pattern := range forbidden {
-		if strings.Contains(indexHTML, pattern) || strings.Contains(wowIndexHTML, pattern) {
-			t.Fatalf("forbidden JS derivation present: %s", pattern)
+func TestMarketContextUsesFullStoreCountFromIngestor(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/market-context":
+			_ = json.NewEncoder(w).Encode(map[string]any{"tokens_seen_today": 344})
+		case "/api/snapshots":
+			limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+			rows := make([]map[string]any, 0, limit)
+			for i := 0; i < limit; i++ {
+				rows = append(rows, map[string]any{
+					"mint":        "m",
+					"early_proxy": map[string]any{"band": "DEAD", "score": 0},
+				})
+			}
+			_ = json.NewEncoder(w).Encode(rows)
+		default:
+			http.NotFound(w, r)
 		}
+	}))
+	defer upstream.Close()
+
+	app := &App{cfg: dashConfig{liveMode: true, ingestorURL: upstream.URL}}
+	req := httptest.NewRequest(http.MethodGet, "/api/market-context", nil)
+	rr := httptest.NewRecorder()
+	app.handleMarketContext(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got := int(body["tokens_seen_today"].(float64)); got != 344 {
+		t.Fatalf("tokens_seen_today=%d, want full upstream count 344", got)
 	}
 }

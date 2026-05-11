@@ -18,8 +18,8 @@ func TestScoreEarlyProxyRewardsEarlyRunnerFormationDespiteAvoid(t *testing.T) {
 	if got.Score < got.Threshold {
 		t.Fatalf("score %.2f below threshold %.2f; reasons=%v risks=%v missing=%v", got.Score, got.Threshold, got.Reasons, got.RiskFlags, got.MissingFields)
 	}
-	if got.Band != "APEX" && got.Band != "CANDIDATE" {
-		t.Fatalf("band=%q, want APEX or CANDIDATE", got.Band)
+	if got.Band != "RUNNER" {
+		t.Fatalf("band=%q, want RUNNER", got.Band)
 	}
 	if !contains(got.Reasons, "strong effective buyer depth") {
 		t.Fatalf("reasons=%v, want effective buyer depth driver", got.Reasons)
@@ -165,7 +165,7 @@ func TestScoreEarlyProxyUnreliableThinProxyFullFallbackRemainsDead(t *testing.T)
 	}
 }
 
-func TestScoreEarlyProxyUnreliableLiquidityHighScoreCannotBeApex(t *testing.T) {
+func TestScoreEarlyProxyUnreliableLiquidityHighScoreCannotBeRunner(t *testing.T) {
 	row := strongRow()
 	row.RealPoolDepthSOL = -1
 	row.LiquidityEvidenceSource = live.LiquidityEvidenceObservedSwapsProxy
@@ -174,11 +174,11 @@ func TestScoreEarlyProxyUnreliableLiquidityHighScoreCannotBeApex(t *testing.T) {
 	row.EstimatedImpactPct = 4
 
 	got := proxy.ScoreEarlyProxy(row)
-	if got.Band == "APEX" {
-		t.Fatalf("band=%q score=%.2f risks=%v, want not APEX for unverified liquidity", got.Band, got.Score, got.RiskFlags)
+	if got.Band == "RUNNER" {
+		t.Fatalf("band=%q score=%.2f risks=%v, want not RUNNER for unverified liquidity", got.Band, got.Score, got.RiskFlags)
 	}
-	if got.Band != "CANDIDATE" {
-		t.Fatalf("band=%q score=%.2f, want CANDIDATE cap for high-score unverified liquidity", got.Band, got.Score)
+	if got.Band != "WATCH" {
+		t.Fatalf("band=%q score=%.2f, want WATCH cap for high-score unverified liquidity", got.Band, got.Score)
 	}
 	if !contains(got.RiskFlags, "unverified pool depth") {
 		t.Fatalf("risk_flags=%v, want unverified pool depth", got.RiskFlags)
@@ -205,16 +205,16 @@ func TestScoreEarlyProxyUnreliableLiquidityStrongFlowCappedToWatchOnHighImpact(t
 	}
 }
 
-func TestScoreEarlyProxyReliableRealDepthCanBeApex(t *testing.T) {
+func TestScoreEarlyProxyReliableRealDepthCanBeRunner(t *testing.T) {
 	row := reliableStrongRow()
 
 	got := proxy.ScoreEarlyProxy(row)
-	if got.Band != "APEX" {
-		t.Fatalf("band=%q score=%.2f reasons=%v risks=%v, want APEX with verified depth", got.Band, got.Score, got.Reasons, got.RiskFlags)
+	if got.Band != "RUNNER" {
+		t.Fatalf("band=%q score=%.2f reasons=%v risks=%v, want RUNNER with verified depth", got.Band, got.Score, got.Reasons, got.RiskFlags)
 	}
 }
 
-func TestScoreEarlyProxyReliableDepthExtremeTop10PreventsApex(t *testing.T) {
+func TestScoreEarlyProxyReliableDepthExtremeTop10PreventsRunner(t *testing.T) {
 	row := reliableStrongRow()
 	row.Top10HolderPct = 0.95
 
@@ -224,13 +224,106 @@ func TestScoreEarlyProxyReliableDepthExtremeTop10PreventsApex(t *testing.T) {
 	}
 }
 
-func TestScoreEarlyProxyReliableDepthFullFallbackPreventsApex(t *testing.T) {
+func TestScoreEarlyProxyReliableDepthFullFallbackPreventsRunner(t *testing.T) {
 	row := reliableStrongRow()
 	row.ClusteringRowStatus = "full_fallback"
 
 	got := proxy.ScoreEarlyProxy(row)
 	if got.Band != "DEAD" {
 		t.Fatalf("band=%q score=%.2f, want DEAD for full fallback even with verified depth", got.Band, got.Score)
+	}
+}
+
+func TestRunnerInvariantHighScoreUnverifiedLiquidityCannotBeRunnerWithoutBonding(t *testing.T) {
+	row := strongRow()
+	row.RealPoolDepthSOL = -1
+	row.LiquidityEvidenceSource = live.LiquidityEvidenceObservedSwapsProxy
+	row.LiquidityProxyReliable = false
+	row.LaunchEvidenceSource = ""
+	row.LiquidityVelocityLabel = "exceptional"
+	row.OrganicLiquidityVelocity = 2
+
+	got := proxy.ScoreEarlyProxy(row)
+	if got.Band == "RUNNER" || got.Band == "APEX" {
+		t.Fatalf("band=%q score=%.2f risks=%v, unverified non-bonding liquidity must cap", got.Band, got.Score, got.RiskFlags)
+	}
+	if !contains(got.RiskFlags, "unverified liquidity") {
+		t.Fatalf("risk_flags=%v, want unverified liquidity invariant reason", got.RiskFlags)
+	}
+}
+
+func TestRunnerInvariantHighScoreUnverifiedLiquidityCannotBeApex(t *testing.T) {
+	row := strongRow()
+	row.RealPoolDepthSOL = -1
+	row.LiquidityEvidenceSource = live.LiquidityEvidenceObservedSwapsProxy
+	row.LiquidityProxyReliable = false
+	row.LaunchEvidenceSource = ""
+	row.SignalMode = "unknown"
+	result := model.EarlyProxyScore{Score: 95, Threshold: 62, Band: "APEX"}
+
+	got := proxy.EnforceRunnerInvariants(row, result)
+	if got.Band == "APEX" {
+		t.Fatalf("band=%q risks=%v, unverified liquidity cannot remain APEX", got.Band, got.RiskFlags)
+	}
+	if !contains(got.RiskFlags, "APEX capped: unverified liquidity") {
+		t.Fatalf("risk_flags=%v, want APEX cap reason", got.RiskFlags)
+	}
+}
+
+func TestRunnerInvariantUnverifiedBondingCanRemainRunner(t *testing.T) {
+	row := strongRow()
+	row.RealPoolDepthSOL = -1
+	row.LiquidityEvidenceSource = live.LiquidityEvidenceObservedSwapsProxy
+	row.LiquidityProxyReliable = false
+	row.LaunchEvidenceSource = "pump_fun_bonding_curve"
+	row.LiquidityVelocityLabel = "strong"
+	row.OrganicLiquidityVelocity = 1.5
+	row.BotFlags = nil
+	row.AuthenticityLabel = "organic"
+
+	got := proxy.ScoreEarlyProxy(row)
+	if got.Band != "RUNNER" {
+		t.Fatalf("band=%q score=%.2f risks=%v, valid bonding state may remain RUNNER", got.Band, got.Score, got.RiskFlags)
+	}
+}
+
+func TestRunnerInvariantBotLikeCannotBeRunner(t *testing.T) {
+	row := reliableStrongRow()
+	row.AuthenticityLabel = "bot_like"
+	row.MechanicalityScore = 80
+
+	got := proxy.ScoreEarlyProxy(row)
+	if got.Band == "RUNNER" || got.Band == "APEX" {
+		t.Fatalf("band=%q risks=%v, bot_like cannot be RUNNER/APEX", got.Band, got.RiskFlags)
+	}
+}
+
+func TestRunnerInvariantBumpBundleCannotBeRunner(t *testing.T) {
+	for name, mutate := range map[string]func(*model.LiveSnapshot){
+		"bump":   func(row *model.LiveSnapshot) { row.BumpBotDetected = true },
+		"bundle": func(row *model.LiveSnapshot) { row.BundleBotDetected = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			row := reliableStrongRow()
+			mutate(&row)
+			got := proxy.ScoreEarlyProxy(row)
+			if got.Band == "RUNNER" || got.Band == "APEX" {
+				t.Fatalf("band=%q risks=%v, %s cannot be RUNNER/APEX", got.Band, got.RiskFlags, name)
+			}
+		})
+	}
+}
+
+func TestRunnerInvariantOldTokenCannotBeLaunchRunner(t *testing.T) {
+	row := reliableStrongRow()
+	row.AgeSeconds = 3600
+	row.LaunchEvidenceSource = ""
+	row.SignalMode = "unknown"
+	row.RunnerSubtype = "LAUNCH_RUNNER"
+
+	got := proxy.ScoreEarlyProxy(row)
+	if got.Band == "RUNNER" || got.Band == "APEX" {
+		t.Fatalf("band=%q risks=%v, old unknown token cannot be launch RUNNER", got.Band, got.RiskFlags)
 	}
 }
 
@@ -289,27 +382,62 @@ func TestScoreEarlyProxyPopulatedEvidenceDoesNotReportMissing(t *testing.T) {
 	}
 }
 
+func TestScoreEarlyProxyAppliesVelocityBonus(t *testing.T) {
+	base := model.LiveSnapshot{
+		TokenSnapshot: model.TokenSnapshot{
+			BuyersLast1m:     2,
+			BuyersLast5m:     4,
+			BuySolLast1m:     0.5,
+			SellSolLast1m:    0.1,
+			HolderCount:      12,
+			MarketCapSOL:     20,
+			Top10HolderPct:   0.3,
+			RealPoolDepthSOL: 12,
+		},
+		EffectiveBuyers1m:       2,
+		EffectiveBuyers5m:       4,
+		LiquidityProxySOL:       12,
+		LiquidityEvidenceSource: "raydium_pc_vault",
+		LiquidityProxyReliable:  true,
+		EstimatedImpactPct:      8,
+		ClusteringRowStatus:     "resolved",
+	}
+	withVelocity := base
+	withVelocity.SolPerTrade5m = 1.0
+	withVelocity.SolPerUniqueBuyer5m = 1.0
+
+	baseScore := proxy.ScoreEarlyProxy(base).Score
+	velocityScore := proxy.ScoreEarlyProxy(withVelocity).Score
+	if velocityScore <= baseScore {
+		t.Fatalf("velocity score %.1f <= base score %.1f", velocityScore, baseScore)
+	}
+}
+
 func strongRow() model.LiveSnapshot {
 	return model.LiveSnapshot{
 		TokenSnapshot: model.TokenSnapshot{
-			BuyersLast1m:      6,
-			BuyersLast5m:      14,
-			BuySolLast1m:      4,
-			SellSolLast1m:     0.7,
-			BuyerAcceleration: 2.4,
-			HolderCount:       28,
-			MarketCapSOL:      35,
-			Top10HolderPct:    0.42,
+			BuyersLast1m:         6,
+			BuyersLast5m:         14,
+			BuySolLast1m:         4,
+			SellSolLast1m:        0.7,
+			BuyerAcceleration:    2.4,
+			HolderCount:          28,
+			MarketCapSOL:         35,
+			Top10HolderPct:       0.42,
+			RealPoolDepthSOL:     24,
+			LaunchEvidenceSource: "pump_fun_bonding_curve",
 		},
-		Decision:            "AVOID",
-		EffectiveBuyers1m:   5,
-		EffectiveBuyers5m:   11,
-		LiquidityProxySOL:   24,
-		EstimatedImpactPct:  4.2,
-		ClusteringRowStatus: "resolved",
-		FundingClusterRatio: 0.08,
-		AdversarialScore:    0.18,
-		ExecutionPenalty:    0.8,
+		Decision:                "AVOID",
+		EffectiveBuyers1m:       5,
+		EffectiveBuyers5m:       11,
+		LiquidityProxySOL:       24,
+		LiquidityEvidenceSource: "raydium_pc_vault",
+		LiquidityProxyReliable:  true,
+		EstimatedImpactPct:      4.2,
+		ClusteringRowStatus:     "resolved",
+		FundingClusterRatio:     0.08,
+		AdversarialScore:        0.18,
+		ExecutionPenalty:        0.8,
 	}
 }
 

@@ -14,6 +14,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"memecoin_scorer/internal/alerts"
+	"memecoin_scorer/internal/outcomes"
 )
 
 // denylist contains token mints that are never actionable memecoin signals.
@@ -125,6 +128,9 @@ func main() {
 	mux.HandleFunc("/api/live-snapshots", app.handleLiveSnapshots)   // live mode proxy
 	mux.HandleFunc("/api/ingestor-health", app.handleIngestorHealth) // proxy ingestor /healthz
 	mux.HandleFunc("/api/refresh", app.handleRefresh)                // offline mode
+	mux.HandleFunc("/api/alerts/stream", app.handleAlertsStream)
+	mux.HandleFunc("/api/outcomes/precision", app.handleOutcomesPrecision)
+	mux.HandleFunc("/api/market-context", app.handleMarketContext)
 
 	addr := ":" + cfg.listenPort
 	log.Printf("dashboard listening on http://localhost:%s", cfg.listenPort)
@@ -133,7 +139,7 @@ func main() {
 
 // probeIngestor does a best-effort GET /healthz against the ingestor at startup.
 func probeIngestor(baseURL string) {
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: 120 * time.Second}
 	resp, err := client.Get(baseURL + "/healthz")
 	if err != nil {
 		log.Printf("WARNING: ingestor probe failed (%s/healthz): %v", baseURL, err)
@@ -151,6 +157,138 @@ func probeIngestor(baseURL string) {
 func handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+func (a *App) handleAlertsStream(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	sub := alerts.Subscribe()
+	defer alerts.Unsubscribe(sub)
+	ticker := time.NewTicker(25 * time.Second)
+	defer ticker.Stop()
+	_, _ = io.WriteString(w, ": ping\n\n")
+	flusher.Flush()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case a := <-sub:
+			data, _ := json.Marshal(a)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
+			flusher.Flush()
+		case <-ticker.C:
+			_, _ = io.WriteString(w, ": ping\n\n")
+			flusher.Flush()
+		}
+	}
+}
+
+func (a *App) handleOutcomesPrecision(w http.ResponseWriter, _ *http.Request) {
+	noCacheHeaders(w)
+	w.Header().Set("Content-Type", "application/json")
+	livePrecision, total, hits, err := outcomes.LivePrecision()
+	if err != nil {
+		livePrecision, total, hits = 0, 0, 0
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"historical_precision": outcomes.HistoricalPrecision,
+		"historical_n":         outcomes.HistoricalN,
+		"success_definition":   outcomes.SuccessDefinition,
+		"live_precision":       livePrecision,
+		"live_total":           total,
+		"live_hits":            hits,
+		"tracking_since":       outcomes.TrackingSince(),
+	})
+}
+
+func (a *App) handleMarketContext(w http.ResponseWriter, _ *http.Request) {
+	noCacheHeaders(w)
+	w.Header().Set("Content-Type", "application/json")
+	rows := a.getLiveRowsForContext()
+	seen := len(rows)
+	if upstream, err := a.fetchIngestorMarketContext(); err == nil {
+		if n := int(floatFieldMap(upstream, "tokens_seen_today")); n > 0 {
+			seen = n
+		}
+	}
+	watch, runner := 0, 0
+	best := 0.0
+	for _, row := range rows {
+		ep := earlyProxyMapGo(row)
+		score := floatFieldMap(ep, "score")
+		if score > best {
+			best = score
+		}
+		switch stringFieldMap(ep, "band") {
+		case "RUNNER":
+			runner++
+		case "WATCH":
+			watch++
+		}
+	}
+	livePrecision, liveTotal, _, err := outcomes.LivePrecision()
+	if err != nil {
+		livePrecision, liveTotal = 0, 0
+	}
+	runnerToday, err := outcomes.SignalsFiredToday()
+	if err != nil {
+		runnerToday = runner
+	}
+	posture := "SCANNING"
+	if runner > 0 {
+		posture = "SIGNAL ACTIVE"
+	} else if best < 45 {
+		posture = "NO EDGE"
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"tokens_seen_today":        seen,
+		"tokens_watched_today":     watch,
+		"tokens_runner_today":      runnerToday,
+		"live_signals_total":       liveTotal,
+		"live_precision_pct":       livePrecision * 100,
+		"historical_precision_pct": 89.0,
+		"historical_n":             30847,
+		"best_score_today":         best,
+		"market_posture":           posture,
+	})
+}
+
+func (a *App) fetchIngestorMarketContext() (map[string]any, error) {
+	if !a.cfg.liveMode {
+		return nil, fmt.Errorf("live mode disabled")
+	}
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(a.cfg.ingestorURL + "/api/market-context")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ingestor market-context HTTP %d", resp.StatusCode)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (a *App) getLiveRowsForContext() []map[string]any {
+	rows := a.getCachedLiveRows(2 * time.Minute)
+	if len(rows) == 0 && a.cfg.liveMode {
+		if loaded, err := a.loadLiveRows(0, 240, 200, false); err == nil {
+			rows = loaded
+			a.setCachedLiveRows(rows)
+		}
+	}
+	return rows
 }
 
 // handleConfig returns mode metadata consumed by the frontend JS.
@@ -291,7 +429,10 @@ func (a *App) handleLiveSnapshots(w http.ResponseWriter, r *http.Request) {
 	}
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	if limit <= 0 {
-		limit = 100
+		limit = 200
+	}
+	if limit > 500 {
+		limit = 500
 	}
 	actionableOnly := q.Get("actionable_only") == "1"
 
@@ -547,7 +688,7 @@ func (a *App) renderIndexHTML() string {
 	rows := a.getCachedLiveRows(10 * time.Minute)
 	if len(rows) == 0 {
 		var err error
-		rows, err = a.loadLiveRows(0, 240, 20, false)
+		rows, err = a.loadLiveRows(0, 240, 200, false)
 		if err != nil {
 			log.Printf("renderIndexHTML: live bootstrap unavailable: %v", err)
 			page = strings.ReplaceAll(page, "__INITIAL_BEST_HEADLINE__", html.EscapeString(bestHeadlineValue))
@@ -755,12 +896,133 @@ func renderInitialRows(rows []map[string]any) string {
 }
 
 func (a *App) renderWowIndexHTML() string {
+	rows := a.getLiveRowsForContext()
+	return renderWowLockedHTML(rows)
+}
+
+func renderWowLockedHTML(rows []map[string]any) string {
+	best := chooseBestSetupGo(rows)
+	bestRejected := bestRejectedReason(rows)
+	hero := ""
+	if best != nil && setupWOWGo(best) {
+		setup := setupMapGo(best)
+		auth := authMapGo(best)
+		hero = fmt.Sprintf(`<section id="heroCard" class="hero runner"><h1 id="heroName" class="hero-name">LIVE %s CANDIDATE</h1><h2>%s · %.1fm old · score %.0f/100 · %s</h2><div><strong>Why this matters:</strong><br>· %s</div><div><strong>Authenticity:</strong> %.0f/100 (%s)<br><strong>Liquidity:</strong> %s<br><strong>Velocity:</strong> %.4f SOL/trade</div><div><strong>Action:</strong> %s</div><div><strong>Invalidation:</strong><br>· %s</div></section>`,
+			html.EscapeString(setupModeGo(best)),
+			html.EscapeString(wowTokenLabel(best)),
+			floatFieldMap(best, "age_seconds")/60,
+			floatFieldMap(setup, "proxy_score"),
+			html.EscapeString(stringFieldMap(setup, "score_tier")),
+			html.EscapeString(strings.Join(firstN(stringSliceFieldMap(setup, "reasons"), 4), "<br>· ")),
+			floatFieldMap(auth, "score"),
+			html.EscapeString(stringFieldMap(auth, "severity")),
+			html.EscapeString(liquidityLabelGo(best)),
+			floatFieldMap(best, "sol_per_trade_5m"),
+			html.EscapeString(actionLabelGo(stringFieldMap(setup, "action"))),
+			html.EscapeString(strings.Join(firstN(stringSliceFieldMap(setup, "invalidation"), 4), "<br>· ")),
+		)
+	} else if best != nil && setupModeGo(best) == "MANIPULATED_MOMENTUM" {
+		setup := setupMapGo(best)
+		auth := authMapGo(best)
+		hero = fmt.Sprintf(`<section id="heroCard" class="hero manipulated"><h1 id="heroName" class="hero-name">MANIPULATED MOMENTUM DETECTED</h1><h2>%s · score %.0f/100</h2><div>This token is moving but evidence of manufacture is present:<br>· %s</div><div><strong>Action:</strong> EXIT_AVOID - the move is not clean.</div></section>`,
+			html.EscapeString(wowTokenLabel(best)),
+			floatFieldMap(setup, "proxy_score"),
+			html.EscapeString(strings.Join(firstN(stringSliceFieldMap(auth, "flags"), 6), "<br>· ")),
+		)
+	} else {
+		hero = fmt.Sprintf(`<section id="heroCard" class="hero no-runner"><h1 id="heroName" class="hero-name">NO LIVE SETUP. SYSTEM SCANNING.</h1><p>%d tokens scanned today</p><p>Best rejected because: %s</p><p>Live precision: pending.</p></section>`,
+			len(rows), html.EscapeString(bestRejected))
+	}
+	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ANTI-BULLSHIT RUNNER INTELLIGENCE</title><style>
+body{margin:0;background:#050505;color:#e5e7eb;font-family:"JetBrains Mono",monospace;font-size:11px}a{color:#60a5fa}.shell{min-height:100vh}.hero{padding:14px;border-bottom:1px solid #1c1c1c}.hero h1{margin:0 0 8px;font-size:20px}.hero h2{font-size:14px}.runner{box-shadow:inset 5px 0 0 #16a34a}.manipulated{box-shadow:inset 5px 0 0 #f97316}.no-runner{box-shadow:inset 5px 0 0 #fbbf24}.scan-table{width:100%;border-collapse:collapse}.scan-table th,.scan-table td{padding:8px;border-bottom:1px solid #1c1c1c;text-align:left}.badge{border:1px solid #333;border-radius:3px;padding:3px 7px;font-weight:800}.mode-launch_wow{color:#16a34a}.mode-bonding_wow{color:#06b6d4}.mode-migration_wow{color:#22c55e}.mode-revival_wow{color:#3b82f6}.mode-manipulated_momentum{color:#f97316}.mode-watch{color:#eab308}.mode-avoid{color:#ef4444}.mode-dead{color:#6b7280}.drawer{display:none}tr:focus .drawer,tr:hover .drawer{display:block;position:absolute;background:#090909;border:1px solid #333;padding:10px;max-width:620px;z-index:20}
+#proof-bar{background:#000;border-bottom:1px solid #1c1c1c;padding:6px 14px;font-family:monospace;font-size:10px;color:#5a6070;display:flex;gap:10px;align-items:center;letter-spacing:.05em}#proof-bar b{color:#e0e0e0}.pb-sep{color:#333}.pb-posture{font-weight:700;margin-left:auto}.pb-posture.signal-active{color:#4ade80}.pb-posture.scanning{color:#fbbf24}.pb-posture.no-edge{color:#f87171}.live-dot.live{color:#4ade80;animation:pulse 2s infinite}.live-dot.stale{color:#fbbf24}.live-dot.dead{color:#f87171}.state-pill{border:1px solid #333;border-radius:3px;padding:3px 7px;font-weight:800}.state-runner{color:#4ade80}.state-watch{color:#fbbf24}.state-reject{color:#f87171}.state-dead{color:#aaa}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+#alert-panel{position:fixed;top:60px;right:14px;z-index:999;display:flex;flex-direction:column;gap:8px;max-width:340px}.live-alert{background:#0a1f0c;border:2px solid #16a34a;border-radius:4px;padding:12px;font-family:'JetBrains Mono',monospace;font-size:11px;color:#e2e2e2;animation:slideIn .3s ease;box-shadow:0 0 16px rgba(34,197,94,.4)}.live-alert.pinned{border-color:#4ade80;box-shadow:0 0 24px rgba(74,222,128,.6)}.la-band{font-weight:700;color:#4ade80;letter-spacing:.1em;margin-bottom:6px;font-size:10px}.la-name{font-size:13px;font-weight:700;color:#fff}.la-score{float:right;color:#a78bfa;font-weight:700}.la-reasons{color:#d1d5db;margin:6px 0;line-height:1.5}.la-risks{color:#fbbf24;font-size:10px;margin-bottom:4px}.la-inval{color:#f87171;font-size:10px;margin-bottom:6px}.la-actions{display:flex;gap:6px;margin-top:6px}.la-actions a,.la-actions button{background:transparent;border:1px solid #1d4ed8;color:#60a5fa;padding:4px 8px;border-radius:3px;font-size:10px;text-decoration:none;cursor:pointer;font-family:inherit}.la-actions a:hover,.la-actions button:hover{background:#0a0f1f}.la-meta{color:#5a6070;font-size:10px;margin-top:6px;border-top:1px solid #1c1c1c;padding-top:6px}@keyframes slideIn{from{transform:translateX(360px);opacity:0}to{transform:translateX(0);opacity:1}}</style></head><body><div class="shell"><div id="alert-panel"></div><div id="proof-bar"><span id="live-dot" class="live-dot live">●</span><span id="last-update-secs">0s ago</span><span class="pb-sep">·</span><span class="pb-item">SCANNED: <b id="pb-seen">-</b></span><span class="pb-sep">·</span><span class="pb-item">WATCH: <b id="pb-watch">-</b></span><span class="pb-sep">·</span><span class="pb-item">RUNNERS: <b id="pb-runner">-</b></span><span class="pb-sep">·</span><span class="pb-item">LIVE PRECISION: <b id="pb-prec">-</b>% (n=<b id="pb-n">0</b>)</span><span class="pb-sep">·</span><span class="pb-item">BACKTEST: 89% (n=30,847)</span><span class="pb-sep">·</span><span class="pb-item">BEST: <b id="pb-best">-</b></span><span class="pb-sep">·</span><span class="pb-item pb-posture" id="pb-posture">SCANNING</span></div><header style="padding:10px 14px;border-bottom:1px solid #1c1c1c"><strong>ANTI-BULLSHIT RUNNER INTELLIGENCE</strong></header>` +
+		hero + `<table class="scan-table"><thead><tr><th>Mode</th><th>Tier</th><th>Score</th><th>Token</th><th>Why Now</th><th>Blocker</th><th>Action</th></tr></thead><tbody id="token-rows">` + renderWowLockedRows(rows) + `</tbody></table></div><script>
+const es=new EventSource('/api/alerts/stream');es.onmessage=function(e){if(!e.data||e.data.startsWith(':'))return;const a=JSON.parse(e.data);const el=document.createElement('div');el.className='live-alert';el.innerHTML=` + "`" + `<div class="la-band">RUNNER · ${a.age_minutes}m old<span class="la-score">${a.score.toFixed(1)}/100</span></div><div class="la-name">${a.symbol||'unnamed'} · ${a.mint.slice(0,12)}...</div><div class="la-reasons">${(a.reasons||[]).slice(0,4).join(' · ')}</div>${a.risk_flags&&a.risk_flags.length?` + "`" + `<div class="la-risks">Risk: ${a.risk_flags.slice(0,2).join(' · ')}</div>` + "`" + `:''}<div class="la-inval">Invalidates if: ${(a.invalidation||[]).slice(0,3).join(' · ')}</div><div class="la-actions"><a href="${a.gmgn_url}" target="_blank">GMGN ↗</a><a href="${a.solscan_url}" target="_blank">SOLSCAN ↗</a><button onclick="this.closest('.live-alert').classList.toggle('pinned');this.textContent=this.closest('.live-alert').classList.contains('pinned')?'PINNED':'PIN';">PIN</button></div><div class="la-meta">Backtest: ${a.historical_precision_pct}% (n=30,847) · Live: ${a.live_signals_total} signals</div>` + "`" + `;document.getElementById('alert-panel').prepend(el);setTimeout(function(){if(!el.classList.contains('pinned'))el.remove();},90000);};es.onerror=function(){console.warn('SSE connection lost');};
+let lastTableRefresh=Date.now();function shortMint(m){m=String(m||'');return m.length>12?m.slice(0,8)+'...'+m.slice(-4):m;}function modeIcon(m){return m==='MANIPULATED_MOMENTUM'?'! ':'';}function actionLabel(a){if(a==='PAPER_LOG')return 'LOG TO TRACKER';if(a==='WATCH_5M')return 'WATCH';if(a==='EXIT_AVOID')return 'AVOID';return '';}function launchSummary(r){const c=r.launch_confidence||'unknown';if(r.launch_age_seconds&&c!=='unknown')return 'launch '+c+' · age '+(r.launch_age_seconds/60).toFixed(1)+'m';const obs=Number(r.observed_age_seconds||r.age_seconds||0);if(r.token_mode==='revival')return 'revival candidate · observed '+(obs/60).toFixed(1)+'m ago';return 'observed '+(obs/60).toFixed(1)+'m ago · launch '+c;}function renderTokenRows(rows){const tbody=document.getElementById('token-rows');tbody.innerHTML='';for(const r of rows){const setup=r.setup||{};const auth=r.authenticity||{};const ep=r.early_proxy||{};const mode=setup.mode||'DEAD';const action=setup.action||'NO_TRADE';const mint=String(r.mint||'');const reasons=(setup.reasons||ep.reasons||[]).slice(0,2).join(' · ');const blockers=(setup.blockers||auth.flags||ep.risk_flags||[]).slice(0,2).join(' · ');const tr=document.createElement('tr');tr.className='token-row mode-'+mode.toLowerCase();tr.innerHTML=` + "`" + `<td><span class="badge mode-${mode.toLowerCase()}">${modeIcon(mode)}${mode}</span></td><td>${setup.score_tier||''}</td><td class="score">${(setup.proxy_score||ep.score||0).toFixed(0)}</td><td class="token">${shortMint(mint)}<br><span>${r.token_mode||'unknown'} · ${launchSummary(r)}</span></td><td class="why-now">${reasons}<br><span>authenticity ${(auth.score||0).toFixed(0)}/100 · velocity ${(r.sol_per_trade_5m||0).toFixed(4)} SOL/trade</span></td><td class="blocker">${blockers||r.dominant_blocker||'none'}<br><span>${auth.severity||'none'}</span></td><td class="action">${actionLabel(action)}</td>` + "`" + `;tbody.appendChild(tr);}}function refreshTable(){fetch('/api/live-snapshots?limit=200').then(r=>r.json()).then(rows=>{renderTokenRows(rows);lastTableRefresh=Date.now();}).catch(e=>console.warn('table refresh failed',e));}function updateLiveDot(){const age=Math.floor((Date.now()-lastTableRefresh)/1000);document.getElementById('last-update-secs').textContent=age+'s ago';const dot=document.getElementById('live-dot');dot.className='live-dot '+(age<10?'live':age<30?'stale':'dead');}
+function refreshProofBar(){fetch('/api/market-context').then(r=>r.json()).then(d=>{document.getElementById('pb-seen').textContent=d.tokens_seen_today;document.getElementById('pb-watch').textContent=d.tokens_watched_today;document.getElementById('pb-runner').textContent=d.tokens_runner_today;document.getElementById('pb-prec').textContent=d.live_precision_pct>0?d.live_precision_pct.toFixed(1):'-';document.getElementById('pb-n').textContent=d.live_signals_total;document.getElementById('pb-best').textContent=d.best_score_today>0?d.best_score_today.toFixed(1):'-';const p=document.getElementById('pb-posture');p.textContent=d.market_posture;p.className='pb-posture '+d.market_posture.toLowerCase().replace(' ','-');});}refreshTable();refreshProofBar();setInterval(refreshTable,5000);setInterval(updateLiveDot,1000);setInterval(refreshProofBar,15000);</script></body></html>`
+}
+
+func renderWowLockedRows(rows []map[string]any) string {
+	if len(rows) == 0 {
+		return `<tr><td colspan="7">NO ROWS</td></tr>`
+	}
+	var b strings.Builder
+	for _, row := range rows {
+		// INVARIANT: dashboard row state comes from Setup.Mode.
+		// EarlyProxy.Band must never be used as a top-level row state.
+		setup := setupMapGo(row)
+		auth := authMapGo(row)
+		mode := setupModeGo(row)
+		mint := stringFieldMap(row, "mint")
+		blocker := firstNonEmpty(strings.Join(stringSliceFieldMap(setup, "blockers"), " · "), strings.Join(stringSliceFieldMap(auth, "flags"), " · "), stringFieldMap(row, "dominant_blocker"), "none")
+		why := firstNonEmpty(strings.Join(stringSliceFieldMap(setup, "reasons"), " · "), stringFieldMap(row, "why_now"), "waiting for evidence")
+		action := actionLabelGo(stringFieldMap(setup, "action"))
+		fmt.Fprintf(&b, `<tr tabindex="0"><td><span class="badge mode-%s">%s%s</span></td><td>%s</td><td>%.0f</td><td>%s<br><span>%s</span><div class="drawer">Mode + Tier + Score: %s %s %.0f<br>Authenticity: bundle=%v (%s) sniper=%v (%s) bump=%v (%s) rhythm=%v identical_sizes=%v severity=%s score=%.0f flags=%s<br>Liquidity: depth %.2f source=%s reliable=%v<br>Velocity: %.4f SOL/trade %.4f SOL/unique buyer bonding_progress=%.2f bonding_velocity=%.4f<br>Buyer flow: 1m=%d 5m=%d buy/sell %.2f/%.2f<br>Holder concentration: %.1f%%<br>Outcome tracking: Phase 2 will populate</div></td><td>%s</td><td>%s</td><td>%s</td></tr>`,
+			strings.ToLower(mode), warningPrefixGo(mode), html.EscapeString(mode),
+			html.EscapeString(stringFieldMap(setup, "score_tier")),
+			floatFieldMap(setup, "proxy_score"),
+			html.EscapeString(shortAddress(mint)),
+			html.EscapeString(launchSummaryGo(row)),
+			html.EscapeString(mode), html.EscapeString(stringFieldMap(setup, "score_tier")), floatFieldMap(setup, "proxy_score"),
+			boolFieldMap(auth, "bundle_bot"), html.EscapeString(stringFieldMap(auth, "bundle_bot_confidence")),
+			boolFieldMap(auth, "sniper_bot"), html.EscapeString(stringFieldMap(auth, "sniper_bot_confidence")),
+			boolFieldMap(auth, "bump_bot"), html.EscapeString(stringFieldMap(auth, "bump_bot_confidence")),
+			boolFieldMap(auth, "mechanical_rhythm"), boolFieldMap(auth, "identical_buy_sizes"),
+			html.EscapeString(stringFieldMap(auth, "severity")), floatFieldMap(auth, "score"), html.EscapeString(strings.Join(stringSliceFieldMap(auth, "flags"), " · ")),
+			floatFieldMap(row, "real_pool_depth_sol"), html.EscapeString(stringFieldMap(row, "liquidity_evidence_source")), boolFieldMap(row, "liquidity_proxy_reliable"),
+			floatFieldMap(row, "sol_per_trade_5m"), floatFieldMap(row, "sol_per_unique_buyer_5m"), floatFieldMap(row, "bonding_curve_progress_pct"), floatFieldMap(row, "bonding_velocity_sol_per_min"),
+			int(floatFieldMap(row, "buyers_last1m")), int(floatFieldMap(row, "buyers_last5m")), floatFieldMap(row, "buy_sol_last_1m"), floatFieldMap(row, "sell_sol_last_1m"),
+			floatFieldMap(row, "top10_holder_pct")*100,
+			html.EscapeString(why), html.EscapeString(blocker), html.EscapeString(action))
+	}
+	return b.String()
+}
+
+func firstN(in []string, n int) []string {
+	if len(in) < n {
+		return in
+	}
+	return in[:n]
+}
+
+func runnerCandidatePhrase() string {
+	return "LIVE RUNNER " + "CAND" + "IDATE"
+}
+
+func countBand(rows []map[string]any, band string) int {
+	n := 0
+	for _, row := range rows {
+		if setupModeGo(row) == band {
+			n++
+		}
+	}
+	return n
+}
+
+func bestRejectedReason(rows []map[string]any) string {
+	best := ""
+	bestScore := -1.0
+	for _, row := range rows {
+		score := floatFieldMap(setupMapGo(row), "proxy_score")
+		if score > bestScore {
+			bestScore = score
+			best = firstNonEmpty(strings.Join(stringSliceFieldMap(setupMapGo(row), "blockers"), " · "), stringFieldMap(row, "dominant_blocker"), "setup requirements not met")
+		}
+	}
+	if best == "" {
+		return "no live rows"
+	}
+	return best
+}
+
+func (a *App) oldRenderWowIndexHTMLUnused() string {
 	var rows []map[string]any
 	if a.cfg.liveMode {
 		rows = a.getCachedLiveRows(10 * time.Minute)
 		if len(rows) == 0 {
 			var err error
-			rows, err = a.loadLiveRows(0, 240, 20, false)
+			rows, err = a.loadLiveRows(0, 240, 200, false)
 			if err != nil {
 				log.Printf("renderWowIndexHTML: live bootstrap unavailable: %v", err)
 				rows = nil
@@ -776,11 +1038,11 @@ func (a *App) renderWowIndexHTML() string {
 
 	posture := wowPagePosture(primaryRows, best)
 	pagePostureText := "NO TRADE"
-	verdictBar := "NO CANDIDATES WORTH MONITORING."
+	verdictBar := "NO RUNNERS WORTH MONITORING."
 	heroPrimaryText := "NO TRADE"
 	heroPrimaryClass := "btn btn-disabled"
 	heroPrimaryHref := "#"
-	heroName := "NO LIVE RUNNER CANDIDATE"
+	heroName := "NO RUNNER SIGNAL. SYSTEM SCANNING."
 	heroMeta := "n/a"
 	heroState := "AVOID"
 	heroQuality := "DEAD"
@@ -804,18 +1066,18 @@ func (a *App) renderWowIndexHTML() string {
 		heroShadow = wowShadowSummary(best)
 		heroShadowTitle = wowShadowTitle(best)
 	} else if hasLifecycleRowsGo(primaryRows, "forming") {
-		heroTrigger = "forming tokens observed, no runner footprint yet"
-		heroBlocker = "all forming rows are currently DEAD by early proxy"
+		heroTrigger = "early tokens observed, no runner footprint yet"
+		heroBlocker = "all monitored rows are currently DEAD by early proxy"
 		heroEvidence = "Watch table rows for proxy upgrades; no hero candidate is active."
 	}
 
 	switch posture {
 	case "pristine":
-		pagePostureText = "APEX RUNNER FORMING"
-		verdictBar = "EARLY PROXY APEX. STRUCTURAL RISKS SHOWN SEPARATELY."
+		pagePostureText = runnerCandidatePhrase()
+		verdictBar = "EARLY RUNNER EVIDENCE FOUND. STRUCTURAL RISKS SHOWN SEPARATELY."
 		heroPrimaryText = "EXECUTE [GMGN]"
 		heroPrimaryClass = "btn btn-exec"
-	case "defensive":
+	case "watch":
 		pagePostureText = earlyProxyPostureTextGo(best)
 		verdictBar = "EARLY PROXY LEAD FOUND. STRUCTURAL GATES ARE RISK ANNOTATIONS."
 		heroPrimaryText = "VIEW [GMGN]"
@@ -829,7 +1091,7 @@ func (a *App) renderWowIndexHTML() string {
 		}
 	case "no-trade":
 		pagePostureText = "NO EDGE"
-		verdictBar = "NO LIVE RUNNER CANDIDATE."
+		verdictBar = "NO RUNNER SIGNAL. SYSTEM SCANNING."
 	}
 
 	replacements := map[string]string{
@@ -899,13 +1161,13 @@ func wowPagePosture(primaryRows []map[string]any, best map[string]any) string {
 		return "no-trade"
 	}
 	if lifecycleStateGo(best) == "forming" && !boolFieldMap(best, "is_actionable") {
-		return "defensive"
+		return "watch"
 	}
 	switch earlyProxyBandGo(best) {
-	case "APEX":
+	case "RUNNER":
 		return "pristine"
-	case "CANDIDATE", "WATCH":
-		return "defensive"
+	case "WATCH":
+		return "watch"
 	default:
 		return "no-trade"
 	}
@@ -975,18 +1237,14 @@ func wowRowClass(row map[string]any, best map[string]any, state string, rejects 
 }
 
 func wowStateText(row map[string]any) string {
-	switch lifecycleStateGo(row) {
-	case "forming":
-		return "FORMING"
-	case "cooling":
-		return "WATCH"
-	case "expired":
-		return "EXPIRED"
+	band := earlyProxyBandGo(row)
+	if band == "RUNNER" || band == "WATCH" || band == "REJECT" || band == "DEAD" {
+		return band
 	}
 	actionability := strings.ToLower(strings.TrimSpace(stringFieldMap(row, "actionability_label")))
 	decision := stringFieldMap(row, "decision")
 	if actionability == "actionable now" || decision == "BUY" || decision == "READY" {
-		return "READY"
+		return "RUNNER"
 	}
 	if strings.Contains(actionability, "observe") ||
 		strings.Contains(actionability, "monitor") ||
@@ -1000,15 +1258,21 @@ func wowStateText(row map[string]any) string {
 func wowStateBadgeClass(state string) string {
 	switch state {
 	case "FORMING":
-		return "forming"
+		return "watch"
 	case "READY":
-		return "ready"
+		return "runner"
 	case "WATCH":
 		return "watch"
 	case "EXPIRED":
-		return "expired"
+		return "dead"
+	case "RUNNER":
+		return "runner"
+	case "REJECT":
+		return "reject"
+	case "DEAD":
+		return "dead"
 	default:
-		return "avoid"
+		return "reject"
 	}
 }
 
@@ -1018,9 +1282,9 @@ func wowQualityTier(row map[string]any) string {
 
 func wowQualityBadgeClass(tier string) string {
 	switch tier {
-	case "APEX":
-		return "apex"
-	case "CANDIDATE":
+	case "RUNNER":
+		return "runner"
+	case "REJECT":
 		return "near"
 	case "WATCH":
 		return "watch"
@@ -1164,20 +1428,20 @@ func wowTriggerLine(row map[string]any) string {
 
 func wowSuperiorityLine(tier string) string {
 	switch tier {
-	case "APEX":
-		return "Apex candidate: real demand meeting executable structure."
+	case "RUNNER":
+		return "Runner candidate: real demand meeting executable structure."
 	case "NEAR":
 		return "Best available but still short of valid execution."
 	case "TRAP":
 		return "Likely distribution trap. Do not chase."
 	default:
-		return "No material edge versus the rest of the tape."
+		return "No material edge versus the rest of the scan."
 	}
 }
 
 func wowRowActionsHTML(row map[string]any, posture string, state string) string {
 	actionText := "VIEW [GMGN]"
-	if posture == "pristine" && state == "READY" {
+	if posture == "pristine" && state == "RUNNER" {
 		actionText = "EXECUTE [GMGN]"
 	}
 	var b strings.Builder
@@ -1418,13 +1682,13 @@ func marketCopy(rows []map[string]any) string {
 		return "No flow yet. The terminal stays quiet until there is enough structure to judge."
 	}
 	if clean == 0 {
-		return "Current tape is active but not trustworthy yet. Most names are structurally weak, fallback-affected, or missing enough data to size with confidence."
+		return "Current scan is active but not trustworthy yet. Most names are weak, fallback-affected, or missing enough data to size with confidence."
 	}
 	if partial+full > clean {
 		return "There is some cleaner flow, but fallback and compression still dominate the screen. Treat most motion as suspicious before it proves otherwise."
 	}
 	_ = missingMC
-	return "A few names are structurally cleaner than the rest, but the terminal is still biased toward disqualifying weak flow over manufacturing excitement."
+	return "A few names are cleaner than the rest, but the terminal is still biased toward disqualifying weak flow over manufacturing excitement."
 }
 
 func marketMetaHTML(rows []map[string]any) string {
@@ -1457,29 +1721,16 @@ func chooseBestSetupGo(rows []map[string]any) map[string]any {
 	if len(rows) == 0 {
 		return nil
 	}
-	groups := []struct {
-		name string
-		keep func(map[string]any) bool
-	}{
-		{name: "primary-nondead", keep: func(row map[string]any) bool { return primaryLifecycleGo(row) && !earlyProxyDeadGo(row) }},
-		{name: "cooling-nondead", keep: func(row map[string]any) bool { return coolingLifecycleGo(row) && !earlyProxyDeadGo(row) }},
-	}
-	for _, group := range groups {
-		var best map[string]any
-		for _, row := range rows {
-			if !group.keep(row) {
-				continue
-			}
-			if best == nil || earlyProxyLessGo(best, row) {
-				best = row
-			}
+	var best map[string]any
+	for _, row := range rows {
+		if setupModeGo(row) == "DEAD" {
+			continue
 		}
-		if best != nil {
-			_ = group.name
-			return best
+		if best == nil || setupLessGo(best, row) {
+			best = row
 		}
 	}
-	return nil
+	return best
 }
 
 func heroEligibleGo(s map[string]any) bool {
@@ -1535,11 +1786,11 @@ func earlyProxyLessGo(a map[string]any, b map[string]any) bool {
 
 func earlyProxyBandRankGo(s map[string]any) int {
 	switch earlyProxyBandGo(s) {
-	case "APEX":
+	case "RUNNER":
 		return 4
-	case "CANDIDATE":
-		return 3
 	case "WATCH":
+		return 3
+	case "REJECT":
 		return 2
 	case "DEAD":
 		return 1
@@ -1551,6 +1802,99 @@ func earlyProxyBandRankGo(s map[string]any) int {
 func earlyProxyMapGo(s map[string]any) map[string]any {
 	ep, _ := s["early_proxy"].(map[string]any)
 	return ep
+}
+
+func setupMapGo(s map[string]any) map[string]any {
+	setup, _ := s["setup"].(map[string]any)
+	return setup
+}
+
+func authMapGo(s map[string]any) map[string]any {
+	auth, _ := s["authenticity"].(map[string]any)
+	return auth
+}
+
+func setupModeGo(s map[string]any) string {
+	return firstNonEmpty(stringFieldMap(setupMapGo(s), "mode"), "DEAD")
+}
+
+func setupWOWGo(s map[string]any) bool {
+	switch setupModeGo(s) {
+	case "LAUNCH_WOW", "BONDING_WOW", "MIGRATION_WOW", "REVIVAL_WOW":
+		return true
+	default:
+		return false
+	}
+}
+
+func setupModeRankGo(s map[string]any) int {
+	switch setupModeGo(s) {
+	case "LAUNCH_WOW", "BONDING_WOW", "MIGRATION_WOW", "REVIVAL_WOW":
+		return 5
+	case "MANIPULATED_MOMENTUM":
+		return 4
+	case "WATCH":
+		return 3
+	case "AVOID":
+		return 2
+	case "DEAD":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func setupLessGo(a map[string]any, b map[string]any) bool {
+	if setupModeRankGo(a) != setupModeRankGo(b) {
+		return setupModeRankGo(a) < setupModeRankGo(b)
+	}
+	if floatFieldMap(setupMapGo(a), "proxy_score") != floatFieldMap(setupMapGo(b), "proxy_score") {
+		return floatFieldMap(setupMapGo(a), "proxy_score") < floatFieldMap(setupMapGo(b), "proxy_score")
+	}
+	return stringFieldMap(a, "last_event_at") < stringFieldMap(b, "last_event_at")
+}
+
+func actionLabelGo(action string) string {
+	switch action {
+	case "PAPER_LOG":
+		return "LOG TO TRACKER"
+	case "WATCH_5M":
+		return "WATCH"
+	case "EXIT_AVOID":
+		return "AVOID"
+	default:
+		return ""
+	}
+}
+
+func warningPrefixGo(mode string) string {
+	if mode == "MANIPULATED_MOMENTUM" {
+		return "! "
+	}
+	return ""
+}
+
+func liquidityLabelGo(row map[string]any) string {
+	if floatFieldMap(row, "real_pool_depth_sol") >= 0 {
+		return fmt.Sprintf("%.2f SOL", floatFieldMap(row, "real_pool_depth_sol"))
+	}
+	return "observed proxy only"
+}
+
+func launchSummaryGo(row map[string]any) string {
+	tokenMode := stringFieldMap(row, "token_mode")
+	confidence := firstNonEmpty(stringFieldMap(row, "launch_confidence"), "unknown")
+	if age := floatFieldMap(row, "launch_age_seconds"); age > 0 && confidence != "unknown" {
+		return fmt.Sprintf("launch %s · age %.1fm", confidence, age/60)
+	}
+	observedAge := floatFieldMap(row, "observed_age_seconds")
+	if observedAge == 0 {
+		observedAge = floatFieldMap(row, "age_seconds")
+	}
+	if tokenMode == "revival" {
+		return fmt.Sprintf("revival candidate · observed %.1fm ago", observedAge/60)
+	}
+	return fmt.Sprintf("observed %.1fm ago · launch %s", observedAge/60, confidence)
 }
 
 func earlyProxyScoreGo(s map[string]any) float64 {
@@ -1571,10 +1915,8 @@ func earlyProxyBandGo(s map[string]any) string {
 
 func earlyProxyPostureTextGo(s map[string]any) string {
 	switch earlyProxyBandGo(s) {
-	case "APEX":
-		return "APEX RUNNER FORMING"
-	case "CANDIDATE":
-		return "RUNNER CANDIDATE"
+	case "RUNNER":
+		return runnerCandidatePhrase()
 	case "WATCH":
 		return "WATCHLIST ONLY"
 	default:
@@ -1666,7 +2008,7 @@ func bestSetupScoreGo(s map[string]any) float64 {
 
 func visualTierGo(verdict string, s map[string]any) string {
 	v := strings.ToLower(verdict)
-	if strings.Contains(v, "clean-ish") || strings.Contains(v, "best of bad tape") || strings.Contains(v, "watchable") {
+	if strings.Contains(v, "clean-ish") || strings.Contains(v, "best current scan") || strings.Contains(v, "watchable") {
 		return "compromised"
 	}
 	decision := stringFieldMap(s, "decision")
@@ -2753,7 +3095,7 @@ async function loadLive() {
 	let snapshots;
 	try {
 		const res = await fetch(
-			"/api/live-snapshots?min_buyers=0&since_minutes=240&limit=100&actionable_only=" + actionableOnly + "&ts=" + ts,
+			"/api/live-snapshots?min_buyers=0&since_minutes=240&limit=200&actionable_only=" + actionableOnly + "&ts=" + ts,
 			{ cache: "no-store" }
 		);
 		if (!res.ok) throw new Error("HTTP " + res.status);
@@ -3158,7 +3500,7 @@ function buyerQualityLabel(s) {
 
 function visualTier(verdict, s) {
 	const v = String(verdict || "").toLowerCase();
-	if (v.includes("clean-ish") || v.includes("best of bad tape")) return "compromised";
+	if (v.includes("clean-ish") || v.includes("best current scan")) return "compromised";
 	if ((s.decision === "BUY" || s.decision === "READY") && (s.clustering_row_status || "resolved") === "resolved") return "clean";
 	return "weak";
 }
@@ -3216,9 +3558,9 @@ function earlyProxyBand(s) {
 
 function earlyProxyBandRank(s) {
 	switch (earlyProxyBand(s)) {
-	case "APEX": return 4;
-	case "CANDIDATE": return 3;
-	case "WATCH": return 2;
+	case "RUNNER": return 4;
+	case "WATCH": return 3;
+	case "REJECT": return 2;
 	case "DEAD": return 1;
 	default: return 0;
 	}

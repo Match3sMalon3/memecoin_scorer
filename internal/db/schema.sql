@@ -183,3 +183,66 @@ CREATE TABLE IF NOT EXISTS swap_events (
 
 CREATE INDEX IF NOT EXISTS swap_events_mint_idx      ON swap_events (mint, block_time DESC);
 CREATE INDEX IF NOT EXISTS swap_events_wallet_idx    ON swap_events (wallet_addr);
+
+-- ============================================================
+-- WOW outcome tracking
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS outcome_signals (
+    id                  SERIAL PRIMARY KEY,
+    mint                TEXT NOT NULL,
+    symbol              TEXT,
+    signal_time         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    runner_score        FLOAT NOT NULL,
+    price_at_signal_sol FLOAT,
+    price_5m_sol        FLOAT,
+    price_15m_sol       FLOAT,
+    price_30m_sol       FLOAT,
+    price_60m_sol       FLOAT,
+    return_5m_pct       FLOAT,
+    return_15m_pct      FLOAT,
+    return_30m_pct      FLOAT,
+    return_60m_pct      FLOAT,
+    max_runup_pct       FLOAT,
+    max_drawdown_pct    FLOAT,
+    mfe_30m_multiple    FLOAT,
+    max_price_0_30m_sol FLOAT,
+    outcome             TEXT DEFAULT 'pending',
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE outcome_signals ADD COLUMN IF NOT EXISTS mfe_30m_multiple FLOAT;
+ALTER TABLE outcome_signals ADD COLUMN IF NOT EXISTS max_price_0_30m_sol FLOAT;
+UPDATE outcome_signals
+SET outcome = CASE
+    WHEN outcome IN ('hit_1_5x','hit_2x') THEN 'hit'
+    WHEN outcome IN ('died','rugged') THEN 'miss'
+    ELSE outcome
+END
+WHERE outcome IN ('hit_1_5x','hit_2x','died','rugged');
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'outcome_signals_outcome_check'
+    ) THEN
+        ALTER TABLE outcome_signals
+            ADD CONSTRAINT outcome_signals_outcome_check
+            CHECK (outcome IN ('pending','hit','miss'));
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_outcome_signals_signal_time
+  ON outcome_signals (signal_time DESC);
+CREATE INDEX IF NOT EXISTS idx_outcome_signals_outcome
+  ON outcome_signals (outcome);
+
+CREATE TABLE IF NOT EXISTS deployer_history (
+    deployer_address  TEXT NOT NULL,
+    mint              TEXT NOT NULL,
+    launched_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    outcome           TEXT DEFAULT 'pending',
+    PRIMARY KEY (deployer_address, mint)
+);
+
+CREATE INDEX IF NOT EXISTS idx_deployer_history_addr
+  ON deployer_history (deployer_address);

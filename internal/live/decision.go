@@ -539,13 +539,13 @@ func BuildDexscreenerURL(_ string) string {
 
 func BuildQualityTier(s *model.LiveSnapshot) string {
 	if s.PriorityLabel == "best_on_tape" && s.ActionabilityLabel == "actionable now" {
-		return "APEX"
+		return "RUNNER"
 	}
 	if s.PriorityLabel == "best_on_tape" {
-		return "NEAR"
+		return "WATCH"
 	}
 	if s.ActionabilityLabel == "observe closely" {
-		return "NEAR"
+		return "WATCH"
 	}
 	if s.TrustLabel == "insider-controlled" {
 		return "TRAP"
