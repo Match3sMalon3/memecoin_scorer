@@ -2,6 +2,8 @@ package runner
 
 import (
 	"context"
+	"log"
+	"sync"
 	"time"
 
 	"memecoin_scorer/internal/alerts"
@@ -10,6 +12,17 @@ import (
 	"memecoin_scorer/internal/outcomes"
 	"memecoin_scorer/internal/proxy"
 )
+
+var (
+	outcomeRecorderMu sync.RWMutex
+	outcomeRecorder   *outcomes.Recorder
+)
+
+func SetOutcomeRecorder(recorder *outcomes.Recorder) {
+	outcomeRecorderMu.Lock()
+	defer outcomeRecorderMu.Unlock()
+	outcomeRecorder = recorder
+}
 
 func ScheduleEarlyScore(ctx context.Context, mint string, firstSeen time.Time) {
 	go func() {
@@ -56,9 +69,21 @@ func PublishIfRunner(snap model.LiveSnapshot) bool {
 		HistoricalPrecisionPct: 89.0,
 		LiveSignalsTotal:       0,
 	})
-	_ = outcomes.RecordSignal(snap, ep.Score)
+	recordOutcomeSignalSnapshot(snap)
 	_ = devprint.RecordLaunch(snap.DeployerAddress, snap.Mint)
 	return true
+}
+
+func recordOutcomeSignalSnapshot(snap model.LiveSnapshot) {
+	outcomeRecorderMu.RLock()
+	recorder := outcomeRecorder
+	outcomeRecorderMu.RUnlock()
+	if recorder == nil {
+		return
+	}
+	if _, _, err := recorder.RecordSignalSnapshot(context.Background(), snap); err != nil {
+		log.Printf("outcome RecordSignalSnapshot %s: %v", snap.Mint, err)
+	}
 }
 
 func HardVeto(s model.LiveSnapshot) bool {

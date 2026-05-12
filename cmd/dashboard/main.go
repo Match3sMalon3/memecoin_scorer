@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -17,6 +19,8 @@ import (
 
 	"memecoin_scorer/internal/alerts"
 	"memecoin_scorer/internal/outcomes"
+
+	_ "github.com/lib/pq"
 )
 
 // denylist contains token mints that are never actionable memecoin signals.
@@ -130,6 +134,9 @@ func main() {
 	mux.HandleFunc("/api/refresh", app.handleRefresh)                // offline mode
 	mux.HandleFunc("/api/alerts/stream", app.handleAlertsStream)
 	mux.HandleFunc("/api/outcomes/precision", app.handleOutcomesPrecision)
+	outcomeDB := openOutcomeDB()
+	defer closeOutcomeDB(outcomeDB)
+	outcomes.RegisterHandlers(mux, outcomeDB)
 	mux.HandleFunc("/api/market-context", app.handleMarketContext)
 
 	addr := ":" + cfg.listenPort
@@ -193,18 +200,14 @@ func (a *App) handleAlertsStream(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleOutcomesPrecision(w http.ResponseWriter, _ *http.Request) {
 	noCacheHeaders(w)
 	w.Header().Set("Content-Type", "application/json")
-	livePrecision, total, hits, err := outcomes.LivePrecision()
-	if err != nil {
-		livePrecision, total, hits = 0, 0, 0
-	}
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"historical_precision": outcomes.HistoricalPrecision,
-		"historical_n":         outcomes.HistoricalN,
-		"success_definition":   outcomes.SuccessDefinition,
-		"live_precision":       livePrecision,
-		"live_total":           total,
-		"live_hits":            hits,
-		"tracking_since":       outcomes.TrackingSince(),
+		"historical_precision": "pending",
+		"historical_n":         0,
+		"success_definition":   "1.2x clean / 2x clean tracked",
+		"live_precision":       "pending",
+		"live_total":           0,
+		"live_hits":            0,
+		"tracking_since":       "pending",
 	})
 }
 
@@ -233,14 +236,8 @@ func (a *App) handleMarketContext(w http.ResponseWriter, _ *http.Request) {
 			watch++
 		}
 	}
-	livePrecision, liveTotal, _, err := outcomes.LivePrecision()
-	if err != nil {
-		livePrecision, liveTotal = 0, 0
-	}
-	runnerToday, err := outcomes.SignalsFiredToday()
-	if err != nil {
-		runnerToday = runner
-	}
+	livePrecision, liveTotal := 0.0, 0
+	runnerToday := runner
 	posture := "SCANNING"
 	if runner > 0 {
 		posture = "SIGNAL ACTIVE"
@@ -258,6 +255,32 @@ func (a *App) handleMarketContext(w http.ResponseWriter, _ *http.Request) {
 		"best_score_today":         best,
 		"market_posture":           posture,
 	})
+}
+
+func openOutcomeDB() *sql.DB {
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		return nil
+	}
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		log.Printf("outcomes db: open failed: %v", err)
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		log.Printf("outcomes db: unavailable: %v", err)
+		_ = db.Close()
+		return nil
+	}
+	return db
+}
+
+func closeOutcomeDB(db *sql.DB) {
+	if db != nil {
+		_ = db.Close()
+	}
 }
 
 func (a *App) fetchIngestorMarketContext() (map[string]any, error) {

@@ -1,0 +1,57 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>outcomes</title>
+<style>
+  body { font: 13px/1.4 ui-monospace, monospace; margin: 16px; }
+  h2 { font-size: 14px; margin: 16px 0 6px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border-bottom: 1px solid #ddd; padding: 4px 8px; text-align: right; white-space: nowrap; }
+  th:nth-child(-n+5), td:nth-child(-n+5) { text-align: left; }
+  tr:hover { background: #f7f7f7; }
+  .good { color: #0a7; }
+  .bad  { color: #c33; }
+  .muted { color: #888; }
+  .pill { display: inline-block; padding: 1px 6px; border-radius: 8px; background: #eef; }
+</style>
+<h2>Pending outcomes</h2>
+<table id="pending"><thead><tr><th>version</th><th>setup_mode</th><th>n_pending</th></tr></thead><tbody></tbody></table>
+<h2>Summary (refreshes every 60s)</h2>
+<table id="summary">
+  <thead><tr>
+    <th>version</th><th>setup_mode</th><th>action</th><th>liq_source</th><th>blockers</th>
+    <th>cp(s)</th><th>n</th><th>tradeable</th><th>1.2x_clean</th><th>2x_clean</th><th>rugged</th>
+    <th>hit_1_2x</th><th>hit_2x</th><th>med_max_ret</th>
+  </tr></thead>
+  <tbody></tbody>
+</table>
+<script>
+async function refresh() {
+  const [pending, summary] = await Promise.all([
+    fetch('/api/outcomes/pending').then(r => r.json()),
+    fetch('/api/outcomes/summary').then(r => r.json()),
+  ]);
+  const pTbody = document.querySelector('#pending tbody');
+  pTbody.innerHTML = pending.map(r =>
+    `<tr><td>${r.classification_version}</td><td>${r.setup_mode}</td><td>${r.n_pending}</td></tr>`
+  ).join('') || '<tr><td colspan=3 class=muted>no pending</td></tr>';
+  const sTbody = document.querySelector('#summary tbody');
+  sTbody.innerHTML = summary.map(r => {
+    const hit12 = r.n_completed ? (100 * r.n_1_2x_clean / r.n_completed).toFixed(1) : '-';
+    const hit2  = r.n_completed ? (100 * r.n_2x_clean   / r.n_completed).toFixed(1) : '-';
+    const cls12 = (+hit12 >= 20) ? 'good' : '';
+    const cls2  = (+hit2  >= 5)  ? 'good' : '';
+    const mret  = (r.median_max_return * 100).toFixed(1);
+    const blockers = (r.blocker_signature || '').slice(0, 60);
+    return `<tr>
+      <td>${r.classification_version}</td><td>${r.setup_mode}</td><td>${r.action}</td>
+      <td>${r.liq_source}</td><td class=muted>${blockers}</td>
+      <td>${r.checkpoint_s}</td><td>${r.n_completed}</td><td>${r.n_tradeable}</td>
+      <td>${r.n_1_2x_clean}</td><td>${r.n_2x_clean}</td><td>${r.n_rugged}</td>
+      <td class=${cls12}>${hit12}%</td><td class=${cls2}>${hit2}%</td>
+      <td>${mret}%</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan=14 class=muted>no completed outcomes yet</td></tr>';
+}
+refresh();
+setInterval(refresh, 60000);
+</script>
