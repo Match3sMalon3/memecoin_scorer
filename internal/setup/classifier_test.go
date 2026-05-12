@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"strings"
 	"testing"
 
 	"memecoin_scorer/internal/model"
@@ -17,8 +18,8 @@ func TestClassifySetupPhase1Actions(t *testing.T) {
 		{"manipulated", manipulatedRow(), model.SetupManipulatedMomentum, model.ActionExitAvoid},
 		{"revival wow", setupRow(model.TokenModeRevival, 60, "none"), model.SetupRevivalWOW, model.ActionPaperLog},
 		{"no flow dead", model.LiveSnapshot{}, model.SetupDead, model.ActionNoTrade},
-		{"thin avoid", model.LiveSnapshot{TokenSnapshot: model.TokenSnapshot{BuyersLast1m: 1, BuyersLast5m: 1, RealPoolDepthSOL: 2}, LiquidityProxyReliable: true}, model.SetupAvoid, model.ActionNoTrade},
-		{"watch", model.LiveSnapshot{TokenSnapshot: model.TokenSnapshot{BuyersLast1m: 1, BuyersLast5m: 1, RealPoolDepthSOL: 10}, LiquidityProxyReliable: true, EarlyProxy: model.EarlyProxyScore{Score: 50}, Authenticity: model.AuthenticityResult{Severity: "none"}}, model.SetupWatch, model.ActionWatch5M},
+		{"thin avoid", model.LiveSnapshot{TokenSnapshot: model.TokenSnapshot{BuyersLast1m: 1, BuyersLast5m: 1, RealPoolDepthSOL: 2, HolderCount: 20, Top10HolderPct: 0.2, BuySolLast1m: 0.1}, LiquidityProxyReliable: true}, model.SetupAvoid, model.ActionNoTrade},
+		{"watch", model.LiveSnapshot{TokenSnapshot: model.TokenSnapshot{BuyersLast1m: 1, BuyersLast5m: 1, RealPoolDepthSOL: 10, HolderCount: 20, Top10HolderPct: 0.2, BuySolLast1m: 0.1}, LiquidityProxyReliable: true, EarlyProxy: model.EarlyProxyScore{Score: 50}, Authenticity: model.AuthenticityResult{Severity: "none"}}, model.SetupWatch, model.ActionWatch5M},
 	}
 	for _, tt := range tests {
 		got := Classify(tt.row)
@@ -63,12 +64,108 @@ func TestOldObservedTokenCannotBecomeLaunchWOW(t *testing.T) {
 	}
 }
 
+func TestHolderDistributionImmatureIsNotTerminal(t *testing.T) {
+	row := setupRow(model.TokenModeLaunch, 70, "none")
+	row.HolderCount = 1
+	row.Top10HolderPct = 1.0
+
+	got := Classify(row)
+	if !containsBlocker(got.Blockers, "distribution immature") {
+		t.Fatalf("got blockers %v want distribution immature", got.Blockers)
+	}
+	if containsBlocker(got.Blockers, "terminal holder concentration") {
+		t.Fatalf("immature distribution reported as terminal: %v", got.Blockers)
+	}
+	if isWOW(got.Mode) {
+		t.Fatalf("immature distribution produced WOW: %+v", got)
+	}
+}
+
+func TestTerminalHolderConcentration(t *testing.T) {
+	row := setupRow(model.TokenModeLaunch, 70, "none")
+	row.HolderCount = 20
+	row.Top10HolderPct = 0.96
+
+	got := Classify(row)
+	if !containsBlocker(got.Blockers, "terminal holder concentration") {
+		t.Fatalf("got blockers %v want terminal concentration", got.Blockers)
+	}
+	if got.BlockerSeverity != "dead" || got.Mode != model.SetupDead {
+		t.Fatalf("got mode=%s severity=%s want DEAD/dead: %+v", got.Mode, got.BlockerSeverity, got)
+	}
+}
+
+func TestNearTerminalHolderConcentration(t *testing.T) {
+	row := setupRow(model.TokenModeLaunch, 70, "none")
+	row.HolderCount = 20
+	row.Top10HolderPct = 0.92
+
+	got := Classify(row)
+	if !containsBlocker(got.Blockers, "near-terminal holder concentration") {
+		t.Fatalf("got blockers %v want near-terminal concentration", got.Blockers)
+	}
+	if got.BlockerSeverity != "avoid" || isWOW(got.Mode) {
+		t.Fatalf("got mode=%s severity=%s want non-WOW/avoid: %+v", got.Mode, got.BlockerSeverity, got)
+	}
+}
+
+func TestHighHolderConcentration(t *testing.T) {
+	row := setupRow(model.TokenModeLaunch, 70, "none")
+	row.HolderCount = 20
+	row.Top10HolderPct = 0.87
+
+	got := Classify(row)
+	if !containsBlocker(got.Blockers, "high holder concentration") {
+		t.Fatalf("got blockers %v want high concentration", got.Blockers)
+	}
+	if got.BlockerSeverity != "watch" || isWOW(got.Mode) {
+		t.Fatalf("got mode=%s severity=%s want non-WOW/watch: %+v", got.Mode, got.BlockerSeverity, got)
+	}
+}
+
+func TestHighScoreRevivalPreciseBlockers(t *testing.T) {
+	row := setupRow(model.TokenModeRevival, 83, "none")
+	row.BuyersLast5m = 9
+	row.EffectiveBuyers5m = 9
+	row.SolPerTrade5m = 1.67
+	row.SolPerUniqueBuyer5m = 1.67
+	row.Top10HolderPct = 0.949
+	row.ClusteringRowStatus = "partial_fallback"
+
+	got := Classify(row)
+	if isWOW(got.Mode) {
+		t.Fatalf("high-score blocked revival produced WOW: %+v", got)
+	}
+	if !containsBlocker(got.Blockers, "near-terminal holder concentration") {
+		t.Fatalf("got blockers %v want near-terminal concentration", got.Blockers)
+	}
+	if !containsBlocker(got.Blockers, "partial clustering fallback") {
+		t.Fatalf("got blockers %v want partial clustering fallback", got.Blockers)
+	}
+	assertNoGenericBlockers(t, got)
+}
+
+func TestSetupBlockersNeverUseGenericPhrases(t *testing.T) {
+	rows := []model.LiveSnapshot{
+		model.LiveSnapshot{},
+		setupRow(model.TokenModeUnknown, 30, "none"),
+		setupRow(model.TokenModeRevival, 83, "none"),
+	}
+	for _, row := range rows {
+		assertNoGenericBlockers(t, Classify(row))
+	}
+}
+
 func setupRow(tokenMode model.TokenMode, score float64, severity string) model.LiveSnapshot {
-	return model.LiveSnapshot{
+	row := model.LiveSnapshot{
 		TokenSnapshot: model.TokenSnapshot{
 			BuyersLast1m:     5,
 			BuyersLast5m:     6,
 			RealPoolDepthSOL: 10,
+			HolderCount:      20,
+			Top10HolderPct:   0.2,
+			BuySolLast1m:     0.5,
+			LaunchConfidence: model.LaunchConfidenceExact,
 		},
 		LiquidityProxyReliable: true,
 		TokenMode:              tokenMode,
@@ -78,6 +175,7 @@ func setupRow(tokenMode model.TokenMode, score float64, severity string) model.L
 		SolPerUniqueBuyer5m:    0.2,
 		ClusteringRowStatus:    "resolved",
 	}
+	return row
 }
 
 func launchSetupRow(confidence model.LaunchConfidence) model.LiveSnapshot {
@@ -96,4 +194,22 @@ func manipulatedRow() model.LiveSnapshot {
 
 func floatPtr(v float64) *float64 {
 	return &v
+}
+
+func containsBlocker(blockers []string, want string) bool {
+	for _, blocker := range blockers {
+		if strings.Contains(blocker, want) {
+			return true
+		}
+	}
+	return false
+}
+
+func assertNoGenericBlockers(t *testing.T, result model.SetupResult) {
+	t.Helper()
+	for _, blocker := range result.Blockers {
+		if blocker == "setup requirements not met" || blocker == "below threshold and no momentum" {
+			t.Fatalf("generic blocker leaked in %+v", result)
+		}
+	}
 }

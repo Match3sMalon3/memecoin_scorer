@@ -76,6 +76,7 @@ type SetupResult struct {
 	VelocityScore     float64        `json:"velocity_score"`
 	Reasons           []string       `json:"reasons"`
 	Blockers          []string       `json:"blockers"`
+	BlockerSeverity   string         `json:"blocker_severity"`
 	Invalidation      []string       `json:"invalidation"`
 }
 
