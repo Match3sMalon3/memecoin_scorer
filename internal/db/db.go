@@ -56,6 +56,15 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// SQLDB exposes the underlying connection pool for packages that need to share
+// the optional application database without opening a second pool.
+func (s *Store) SQLDB() *sql.DB {
+	if s == nil {
+		return nil
+	}
+	return s.db
+}
+
 // UpsertToken inserts or updates the token row for mint.
 // Uses ON CONFLICT DO UPDATE so it is safe to call on every snapshot cycle.
 func (s *Store) UpsertToken(ctx context.Context, snap model.TokenSnapshot) {

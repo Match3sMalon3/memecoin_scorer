@@ -258,9 +258,9 @@ func (a *App) handleMarketContext(w http.ResponseWriter, _ *http.Request) {
 }
 
 func openOutcomeDB() *sql.DB {
-	dsn := os.Getenv("DATABASE_URL")
+	dsn := strings.TrimSpace(os.Getenv("DATABASE_URL"))
 	if dsn == "" {
-		return nil
+		dsn = "postgres://localhost:5432/meme_trading_system_v1?sslmode=disable"
 	}
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {

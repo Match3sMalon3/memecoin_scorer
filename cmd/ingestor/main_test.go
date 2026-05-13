@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"memecoin_scorer/internal/calibration"
 	"memecoin_scorer/internal/ingestor"
 	"memecoin_scorer/internal/live"
 	"memecoin_scorer/internal/model"
@@ -501,6 +503,57 @@ func TestSnapshots_FieldsPresent(t *testing.T) {
 	}
 	if reliable, ok := s["liquidity_proxy_reliable"].(bool); !ok || reliable {
 		t.Errorf("liquidity_proxy_reliable = %v, want false for observed swaps proxy", s["liquidity_proxy_reliable"])
+	}
+}
+
+type fakeOutcomeRecorder struct {
+	rows []model.LiveSnapshot
+}
+
+func (f *fakeOutcomeRecorder) RecordSignalSnapshot(_ context.Context, row model.LiveSnapshot) (int64, bool, error) {
+	f.rows = append(f.rows, row)
+	return int64(len(f.rows)), true, nil
+}
+
+func TestSnapshots_RecordsClassifiedRows(t *testing.T) {
+	store := state.New()
+	recorder := &fakeOutcomeRecorder{}
+	srv := httptest.NewServer(newServerWithCalibration(
+		store,
+		nil,
+		calibration.NewRecorder(),
+		"",
+		live.DefaultLiveConfig(),
+		ingestor.NewIngressHealth(),
+		nil,
+		nil,
+		recorder,
+	))
+	t.Cleanup(srv.Close)
+
+	applySnapshot(t, store, testMint, 3, 2.0, time.Now().Add(-30*time.Second))
+	snaps := getSnapshots(t, srv, "?min_buyers=1&since_minutes=5")
+	if len(snaps) != 1 {
+		t.Fatalf("len=%d, want one live row", len(snaps))
+	}
+	if len(recorder.rows) != 1 {
+		t.Fatalf("recorded rows=%d, want 1", len(recorder.rows))
+	}
+	row := recorder.rows[0]
+	if row.Setup.Mode == "" || row.Setup.Action == "" {
+		t.Fatalf("recorded row missing setup classification: %+v", row.Setup)
+	}
+	if row.TokenMode == "" {
+		t.Fatalf("recorded row missing token mode")
+	}
+}
+
+func TestSnapshots_NilOutcomeRecorderDoesNotPanic(t *testing.T) {
+	srv, store := newTestServer(t, "")
+	applySnapshot(t, store, testMint, 3, 2.0, time.Now().Add(-30*time.Second))
+	snaps := getSnapshots(t, srv, "?min_buyers=1&since_minutes=5")
+	if len(snaps) != 1 {
+		t.Fatalf("len=%d, want one live row", len(snaps))
 	}
 }
 

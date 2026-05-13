@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"log"
@@ -20,15 +21,22 @@ import (
 	"memecoin_scorer/internal/live"
 	"memecoin_scorer/internal/mode"
 	"memecoin_scorer/internal/model"
+	"memecoin_scorer/internal/outcomes"
 	"memecoin_scorer/internal/proxy"
 	"memecoin_scorer/internal/rpc"
 	"memecoin_scorer/internal/setup"
 	"memecoin_scorer/internal/shadow"
 	"memecoin_scorer/internal/state"
+
+	_ "github.com/lib/pq"
 )
 
 const maxBodyBytes = 4 << 20
 const maxSnapshotLimit = 500
+
+type signalSnapshotRecorder interface {
+	RecordSignalSnapshot(context.Context, model.LiveSnapshot) (int64, bool, error)
+}
 
 // resolverFromEnv selects and constructs the active FunderResolver.
 //
@@ -165,6 +173,24 @@ func maskAPIKey(raw string) string {
 		return raw[:start] + "***" + raw[end:]
 	}
 	return raw
+}
+
+func openOutcomeRecorderDB() (*sql.DB, error) {
+	dsn := strings.TrimSpace(os.Getenv("DATABASE_URL"))
+	if dsn == "" {
+		dsn = "postgres://localhost:5432/meme_trading_system_v1?sslmode=disable"
+	}
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return db, nil
 }
 
 // makeApplyFn returns a function that applies a swap event to the store and,
@@ -314,6 +340,18 @@ func main() {
 	} else if dbStore != nil {
 		log.Printf("db: persistence enabled")
 	}
+	var outcomeRecorder signalSnapshotRecorder
+	var outcomeRecorderDB *sql.DB
+	if dbStore != nil {
+		outcomeRecorder = outcomes.NewRecorder(dbStore.SQLDB())
+	} else if recorderDB, err := openOutcomeRecorderDB(); err != nil {
+		log.Printf("WARNING: outcome recorder DB unavailable (%v) — signal_snapshots recording disabled", err)
+	} else if recorderDB != nil {
+		outcomeRecorderDB = recorderDB
+		defer outcomeRecorderDB.Close()
+		outcomeRecorder = outcomes.NewRecorder(outcomeRecorderDB)
+		log.Printf("outcome recorder: persistence enabled")
+	}
 
 	clusterBackend := cluster.ResolverBackendName(liveCfg.FunderResolver)
 	clusterHealthy := cluster.IsResolverHealthy(liveCfg.FunderResolver)
@@ -346,7 +384,7 @@ func main() {
 		}
 	}()
 
-	srv := newServerWithCalibration(store, dbStore, calibrationRecorder, secret, liveCfg, ingressHealth, poller, depthClient)
+	srv := newServerWithCalibration(store, dbStore, calibrationRecorder, secret, liveCfg, ingressHealth, poller, depthClient, outcomeRecorder)
 
 	addr := ":" + resolveIngestorPort()
 	log.Printf("ingestor listening on http://localhost%s", addr)
@@ -363,7 +401,7 @@ func newServer(
 	ingressHealth *ingestor.IngressHealth,
 	poller *ingestor.Poller,
 ) http.Handler {
-	return newServerWithCalibration(store, dbStore, calibration.NewRecorder(), secret, liveCfg, ingressHealth, poller, nil)
+	return newServerWithCalibration(store, dbStore, calibration.NewRecorder(), secret, liveCfg, ingressHealth, poller, nil, nil)
 }
 
 func newServerWithCalibration(
@@ -375,11 +413,12 @@ func newServerWithCalibration(
 	ingressHealth *ingestor.IngressHealth,
 	poller *ingestor.Poller,
 	depthClient *rpc.DepthClient,
+	outcomeRecorder signalSnapshotRecorder,
 ) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", makeHealthzHandler(liveCfg, ingressHealth, poller))
 	mux.HandleFunc("/webhook", makeWebhookHandler(store, dbStore, secret, depthClient))
-	mux.HandleFunc("/api/snapshots", makeSnapshotsHandler(store, dbStore, calibrationRecorder, liveCfg))
+	mux.HandleFunc("/api/snapshots", makeSnapshotsHandler(store, dbStore, calibrationRecorder, liveCfg, outcomeRecorder))
 	mux.HandleFunc("/api/market-context", makeMarketContextHandler(store, liveCfg))
 	mux.HandleFunc("/api/calibration-samples", makeCalibrationSamplesHandler(calibrationRecorder))
 
@@ -479,7 +518,7 @@ func makeWebhookHandler(store *state.Store, dbStore *db.Store, secret string, de
 	}
 }
 
-func makeSnapshotsHandler(store *state.Store, dbStore *db.Store, calibrationRecorder *calibration.Recorder, liveCfg live.LiveConfig) http.HandlerFunc {
+func makeSnapshotsHandler(store *state.Store, dbStore *db.Store, calibrationRecorder *calibration.Recorder, liveCfg live.LiveConfig, outcomeRecorder signalSnapshotRecorder) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -592,6 +631,7 @@ func makeSnapshotsHandler(store *state.Store, dbStore *db.Store, calibrationReco
 			scored.TokenMode = mode.Classify(scored)
 			scored.Authenticity = authenticity.Detect(scored, buys5m, store.GetWalletEvents(scored.Mint), store.GetCreationBlock(scored.Mint))
 			scored.Setup = setup.Classify(scored)
+			recordSignalSnapshot(context.WithoutCancel(r.Context()), outcomeRecorder, scored)
 			// Persist actionable BUY/READY signals to DB and emit console line.
 			if scored.IsActionable && (scored.Decision == "BUY" || scored.Decision == "READY") {
 				go dbStore.InsertSignal(context.WithoutCancel(r.Context()), scored)
@@ -620,6 +660,17 @@ func makeSnapshotsHandler(store *state.Store, dbStore *db.Store, calibrationReco
 		if err := json.NewEncoder(w).Encode(out); err != nil {
 			log.Printf("snapshots encode: %v", err)
 		}
+	}
+}
+
+func recordSignalSnapshot(ctx context.Context, recorder signalSnapshotRecorder, row model.LiveSnapshot) {
+	if recorder == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if _, _, err := recorder.RecordSignalSnapshot(ctx, row); err != nil {
+		log.Printf("outcome snapshot record %s: %v", row.Mint, err)
 	}
 }
 
