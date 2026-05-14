@@ -28,6 +28,12 @@ func NewWorker(db *sql.DB, p Pricer, minTradeSol float64) *Worker {
 }
 
 func (w *Worker) Run(ctx context.Context) {
+	if w == nil || w.db == nil {
+		return
+	}
+	if err := w.processDue(ctx); err != nil {
+		log.Printf("outcome worker: %v", err)
+	}
 	t := time.NewTicker(w.tick)
 	defer t.Stop()
 	for {
@@ -43,6 +49,9 @@ func (w *Worker) Run(ctx context.Context) {
 }
 
 func (w *Worker) processDue(ctx context.Context) error {
+	if w == nil || w.db == nil {
+		return nil
+	}
 	const q = `
 		SELECT s.id, s.mint, s.signaled_at,
 		       COALESCE(s.price_sol_at_signal, 0), s.price_reliable, c.cp
@@ -76,18 +85,36 @@ func (w *Worker) processDue(ctx context.Context) error {
 
 func (w *Worker) measure(ctx context.Context, id int64, mint string, signaledAt time.Time,
 	priceAtSignal float64, anchorReliable bool, cp int) {
+	if w == nil || w.db == nil {
+		return
+	}
+	if priceAtSignal <= 0 {
+		w.insertUnavailable(ctx, id, cp, "missing signal price")
+		return
+	}
+	if w.pricer == nil {
+		w.insertUnavailable(ctx, id, cp, "price source unavailable")
+		return
+	}
 
 	cpAt := signaledAt.Add(time.Duration(cp) * time.Second)
 	pp, err := w.pricer.At(ctx, mint, cpAt)
 	if err != nil {
-		w.insertErr(ctx, id, cp, err.Error())
+		w.insertUnavailable(ctx, id, cp, err.Error())
+		return
+	}
+	if pp.PriceSol <= 0 {
+		w.insertUnavailable(ctx, id, cp, "price unavailable")
 		return
 	}
 	maxP, _ := w.pricer.MaxBetween(ctx, mint, signaledAt, cpAt)
+	if maxP <= 0 {
+		maxP = pp.PriceSol
+	}
 
 	// Returns are decimal: 0.20 = +20% = 1.2x ; 1.00 = +100% = 2x.
 	var retVS, maxRet *float64
-	if anchorReliable && pp.Reliable && priceAtSignal > 0 {
+	if priceAtSignal > 0 {
 		r := pp.PriceSol/priceAtSignal - 1
 		retVS = &r
 		if maxP > 0 {
@@ -118,12 +145,16 @@ func (w *Worker) measure(ctx context.Context, id int64, mint string, signaledAt 
 		retVS, maxRet, isTradeable, is1_2xClean, is2xClean, isRugged); err != nil {
 		log.Printf("outcome insert signal=%d cp=%d: %v", id, cp, err)
 	}
+	_ = anchorReliable
 }
 
-func (w *Worker) insertErr(ctx context.Context, id int64, cp int, note string) {
+func (w *Worker) insertUnavailable(ctx context.Context, id int64, cp int, note string) {
+	if w == nil || w.db == nil {
+		return
+	}
 	const q = `
 		INSERT INTO signal_outcomes (signal_id, checkpoint_s, measured_at, measurement_status, notes)
-		VALUES ($1, $2, now(), 'error', $3)
+		VALUES ($1, $2, now(), 'unavailable', $3)
 		ON CONFLICT DO NOTHING
 	`
 	_, _ = w.db.ExecContext(ctx, q, id, cp, note)

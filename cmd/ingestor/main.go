@@ -341,15 +341,18 @@ func main() {
 		log.Printf("db: persistence enabled")
 	}
 	var outcomeRecorder signalSnapshotRecorder
-	var outcomeRecorderDB *sql.DB
+	var outcomeDB *sql.DB
+	var ownedOutcomeDB *sql.DB
 	if dbStore != nil {
-		outcomeRecorder = outcomes.NewRecorder(dbStore.SQLDB())
+		outcomeDB = dbStore.SQLDB()
+		outcomeRecorder = outcomes.NewRecorder(outcomeDB)
 	} else if recorderDB, err := openOutcomeRecorderDB(); err != nil {
 		log.Printf("WARNING: outcome recorder DB unavailable (%v) — signal_snapshots recording disabled", err)
 	} else if recorderDB != nil {
-		outcomeRecorderDB = recorderDB
-		defer outcomeRecorderDB.Close()
-		outcomeRecorder = outcomes.NewRecorder(outcomeRecorderDB)
+		outcomeDB = recorderDB
+		ownedOutcomeDB = recorderDB
+		defer ownedOutcomeDB.Close()
+		outcomeRecorder = outcomes.NewRecorder(outcomeDB)
 		log.Printf("outcome recorder: persistence enabled")
 	}
 
@@ -371,6 +374,12 @@ func main() {
 
 	if poller != nil {
 		poller.Start(ctx, applyFn)
+	}
+	if outcomeDB != nil {
+		pricer := outcomes.NewVaultPricer(nil, outcomes.NewSQLSwapStore(outcomeDB))
+		worker := outcomes.NewWorker(outcomeDB, pricer, liveCfg.TradeSizeSOL)
+		go worker.Run(ctx)
+		log.Printf("outcome worker: started")
 	}
 
 	go func() {
