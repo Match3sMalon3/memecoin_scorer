@@ -23,6 +23,11 @@ import (
 	_ "github.com/lib/pq"
 )
 
+const (
+	dashboardRootFetchTimeout = 750 * time.Millisecond
+	dashboardAPIFetchTimeout  = 3 * time.Second
+)
+
 // denylist contains token mints that are never actionable memecoin signals.
 // Only infrastructure tokens and stablecoins belong here — not memecoins.
 var denylist = map[string]bool{
@@ -146,7 +151,7 @@ func main() {
 
 // probeIngestor does a best-effort GET /healthz against the ingestor at startup.
 func probeIngestor(baseURL string) {
-	client := &http.Client{Timeout: 120 * time.Second}
+	client := &http.Client{Timeout: 2 * time.Second}
 	resp, err := client.Get(baseURL + "/healthz")
 	if err != nil {
 		log.Printf("WARNING: ingestor probe failed (%s/healthz): %v", baseURL, err)
@@ -313,7 +318,7 @@ func (a *App) fetchIngestorMarketContext() (map[string]any, error) {
 func (a *App) getLiveRowsForContext() []map[string]any {
 	rows := a.getCachedLiveRows(2 * time.Minute)
 	if len(rows) == 0 && a.cfg.liveMode {
-		if loaded, err := a.loadLiveRows(0, 240, 200, false); err == nil {
+		if loaded, err := a.loadLiveRowsWithTimeout(0, 240, 200, false, dashboardRootFetchTimeout); err == nil {
 			rows = loaded
 			a.setCachedLiveRows(rows)
 		}
@@ -333,13 +338,20 @@ func (a *App) handleConfig(w http.ResponseWriter, _ *http.Request) {
 
 // fetchLiveSnapshots calls the ingestor's /api/snapshots endpoint.
 func (a *App) fetchLiveSnapshots(minBuyers int, sinceMinutes int, limit int, actionableOnly bool) ([]byte, error) {
+	return a.fetchLiveSnapshotsWithTimeout(minBuyers, sinceMinutes, limit, actionableOnly, dashboardAPIFetchTimeout)
+}
+
+func (a *App) fetchLiveSnapshotsWithTimeout(minBuyers int, sinceMinutes int, limit int, actionableOnly bool, timeout time.Duration) ([]byte, error) {
 	ao := "0"
 	if actionableOnly {
 		ao = "1"
 	}
 	url := fmt.Sprintf("%s/api/snapshots?min_buyers=%d&since_minutes=%d&limit=%d&actionable_only=%s",
 		a.cfg.ingestorURL, minBuyers, sinceMinutes, limit, ao)
-	client := &http.Client{Timeout: 30 * time.Second}
+	if timeout <= 0 {
+		timeout = dashboardAPIFetchTimeout
+	}
+	client := &http.Client{Timeout: timeout}
 	resp, err := client.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("ingestor unreachable: %w", err)
@@ -356,7 +368,11 @@ func (a *App) fetchLiveSnapshots(minBuyers int, sinceMinutes int, limit int, act
 }
 
 func (a *App) loadLiveRows(minBuyers int, sinceMinutes int, limit int, actionableOnly bool) ([]map[string]any, error) {
-	body, err := a.fetchLiveSnapshots(minBuyers, sinceMinutes, limit, actionableOnly)
+	return a.loadLiveRowsWithTimeout(minBuyers, sinceMinutes, limit, actionableOnly, dashboardAPIFetchTimeout)
+}
+
+func (a *App) loadLiveRowsWithTimeout(minBuyers int, sinceMinutes int, limit int, actionableOnly bool, timeout time.Duration) ([]map[string]any, error) {
+	body, err := a.fetchLiveSnapshotsWithTimeout(minBuyers, sinceMinutes, limit, actionableOnly, timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -469,8 +485,11 @@ func (a *App) handleLiveSnapshots(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.loadLiveRows(minBuyers, sinceMinutes, limit, actionableOnly)
 	if err != nil {
 		log.Printf("live-snapshots: %v", err)
-		w.WriteHeader(http.StatusBadGateway)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		rows = a.getCachedLiveRows(10 * time.Minute)
+		if rows == nil {
+			rows = []map[string]any{}
+		}
+		_ = json.NewEncoder(w).Encode(rows)
 		return
 	}
 
@@ -990,7 +1009,7 @@ func renderReviewHero(row map[string]any) string {
 	auth := authMapGo(row)
 	blockers := stringSliceFieldMap(setup, "blockers")
 	action := stringFieldMap(setup, "action")
-	return fmt.Sprintf(`<section id="heroCard" class="hero hero-review"><div><h1>LIVE REVIEW CANDIDATE</h1><h2>%s · %s · score %.0f/100</h2><strong>Not clean WOW yet:</strong>%s<p><strong>Review reason:</strong> %s</p><div class="hero-actions">%s</div></div><div><strong>Why it matters:</strong><ul><li>authenticity %.0f/100 (%s)</li><li>velocity %.4f SOL/trade</li><li>buyers %d/1m, %d/5m</li><li>liquidity %s via %s</li></ul><strong>Action:</strong> %s - no automatic entry.</div></section>`,
+	return fmt.Sprintf(`<section id="heroCard" class="hero hero-review"><div><h1>LIVE REVIEW CANDIDATE</h1><h2>%s · %s · score %.0f/100</h2><strong>Not clean WOW yet:</strong>%s<p><strong>Review reason:</strong> %s</p><div class="hero-actions">%s</div></div><div><strong>Why it matters:</strong><ul><li>authenticity %.0f/100 (%s)</li><li>velocity %.4f SOL/trade</li><li>buyers %d/1m, %d/5m</li><li>liquidity %s via %s</li></ul><strong>Review checklist:</strong>%s<strong>Action:</strong> %s - no automatic entry.</div></section>`,
 		html.EscapeString(wowTokenLabel(row)),
 		html.EscapeString(stringFieldMap(row, "token_mode")),
 		floatFieldMap(setup, "proxy_score"),
@@ -1004,6 +1023,7 @@ func renderReviewHero(row map[string]any) string {
 		int(floatFieldMap(row, "buyers_last5m")),
 		html.EscapeString(liquidityLabelGo(row)),
 		html.EscapeString(stringFieldMap(row, "liquidity_evidence_source")),
+		htmlList(reviewChecklistGo(row), "open token and confirm catalyst"),
 		html.EscapeString(actionLabelGo(action)),
 	)
 }
@@ -1101,7 +1121,7 @@ func renderWowLockedRows(rows []map[string]any, deadOnly bool) string {
 		}
 		why := firstNonEmpty(strings.Join(stringSliceFieldMap(setup, "reasons"), " · "), stringFieldMap(row, "why_now"), "waiting for evidence")
 		action := actionLabelGo(stringFieldMap(setup, "action"))
-		fmt.Fprintf(&b, `<tr tabindex="0" class="mode-%s"><td><span class="badge mode-%s">%s%s</span></td><td>%s</td><td>%.0f</td><td>%s<br><a href="%s" target="_blank" rel="noopener noreferrer">GMGN ↗</a> <a href="%s" target="_blank" rel="noopener noreferrer">Solscan ↗</a><br><span>%s</span><div class="drawer">Mode + Tier + Score: %s %s %.0f<br>Authenticity: bundle=%v (%s) sniper=%v (%s) bump=%v (%s) rhythm=%v identical_sizes=%v severity=%s score=%.0f flags=%s<br>Liquidity: depth %.2f source=%s reliable=%v<br>Velocity: %.4f SOL/trade %.4f SOL/unique buyer bonding_progress=%.2f bonding_velocity=%.4f<br>Buyer flow: 1m=%d 5m=%d buy/sell %.2f/%.2f<br>Holder concentration: %.1f%%<br>Outcome tracking: Phase 2 will populate</div></td><td>%s</td><td>%s</td><td>%s</td></tr>`,
+		fmt.Fprintf(&b, `<tr tabindex="0" class="mode-%s"><td><span class="badge mode-%s">%s%s</span></td><td>%s</td><td>%.0f</td><td>%s<br><a href="%s" target="_blank" rel="noopener noreferrer">GMGN ↗</a> <a href="%s" target="_blank" rel="noopener noreferrer">Solscan ↗</a><br><span>%s</span><div class="drawer">Mode + Tier + Score: %s %s %.0f<br>Authenticity: bundle=%v (%s) sniper=%v (%s) bump=%v (%s) rhythm=%v identical_sizes=%v severity=%s score=%.0f flags=%s<br>Liquidity: depth %.2f source=%s reliable=%v<br>Velocity: %.4f SOL/trade %.4f SOL/unique buyer bonding_progress=%.2f bonding_velocity=%.4f<br>Catalyst: %s via %s<br>Review checklist: %s<br>Buyer flow: 1m=%d 5m=%d buy/sell %.2f/%.2f<br>Holder concentration: %.1f%%<br>Outcome tracking: Phase 2 will populate</div></td><td>%s</td><td>%s</td><td>%s</td></tr>`,
 			strings.ToLower(mode),
 			strings.ToLower(mode), warningPrefixGo(mode), html.EscapeString(mode),
 			html.EscapeString(stringFieldMap(setup, "score_tier")),
@@ -1117,6 +1137,8 @@ func renderWowLockedRows(rows []map[string]any, deadOnly bool) string {
 			html.EscapeString(stringFieldMap(auth, "severity")), floatFieldMap(auth, "score"), html.EscapeString(strings.Join(stringSliceFieldMap(auth, "flags"), " · ")),
 			floatFieldMap(row, "real_pool_depth_sol"), html.EscapeString(stringFieldMap(row, "liquidity_evidence_source")), boolFieldMap(row, "liquidity_proxy_reliable"),
 			floatFieldMap(row, "sol_per_trade_5m"), floatFieldMap(row, "sol_per_unique_buyer_5m"), floatFieldMap(row, "bonding_curve_progress_pct"), floatFieldMap(row, "bonding_velocity_sol_per_min"),
+			html.EscapeString(stringFieldMap(mapFieldMap(row, "catalyst"), "status")), html.EscapeString(stringFieldMap(mapFieldMap(row, "catalyst"), "source")),
+			html.EscapeString(strings.Join(reviewChecklistGo(row), " · ")),
 			int(floatFieldMap(row, "buyers_last1m")), int(floatFieldMap(row, "buyers_last5m")), floatFieldMap(row, "buy_sol_last_1m"), floatFieldMap(row, "sell_sol_last_1m"),
 			floatFieldMap(row, "top10_holder_pct")*100,
 			html.EscapeString(why), html.EscapeString(blockerDisplay), html.EscapeString(action))
@@ -2371,6 +2393,16 @@ func boolFieldMap(m map[string]any, key string) bool {
 	return false
 }
 
+func mapFieldMap(m map[string]any, key string) map[string]any {
+	if m == nil {
+		return nil
+	}
+	if v, ok := m[key].(map[string]any); ok {
+		return v
+	}
+	return nil
+}
+
 func joinListFieldMap(m map[string]any, key string) string {
 	if m == nil {
 		return ""
@@ -2416,6 +2448,13 @@ func stringSliceFieldMap(m map[string]any, key string) []string {
 	default:
 		return nil
 	}
+}
+
+func reviewChecklistGo(row map[string]any) []string {
+	if items := stringSliceFieldMap(row, "review_checklist"); len(items) > 0 {
+		return items
+	}
+	return stringSliceFieldMap(setupMapGo(row), "review_checklist")
 }
 
 func firstNonEmpty(values ...string) string {

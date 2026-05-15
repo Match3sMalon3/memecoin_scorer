@@ -15,6 +15,7 @@ import (
 
 	"memecoin_scorer/internal/authenticity"
 	"memecoin_scorer/internal/calibration"
+	"memecoin_scorer/internal/catalyst"
 	"memecoin_scorer/internal/cluster"
 	"memecoin_scorer/internal/db"
 	"memecoin_scorer/internal/ingestor"
@@ -635,11 +636,17 @@ func makeSnapshotsHandler(store *state.Store, dbStore *db.Store, calibrationReco
 			if scored.BondingCurveProgressPct > 0 && scored.VSolPerMinute > 0 {
 				scored.BondingVelocitySolPerMin = scored.VSolPerMinute
 			}
+			if scored.BondingCurveProgressPct >= 0 {
+				scored.GraduationProximityPct = 100 - scored.BondingCurveProgressPct
+			}
+			scored.TradesToReachCurrentVsol = len(buys5m)
 			proxy.ApplyAuthenticityEvidence(&scored)
 			scored.EarlyProxy = proxy.ScoreEarlyProxy(scored)
 			scored.TokenMode = mode.Classify(scored)
+			scored.Catalyst = catalyst.Detect(scored)
 			scored.Authenticity = authenticity.Detect(scored, buys5m, store.GetWalletEvents(scored.Mint), store.GetCreationBlock(scored.Mint))
 			scored.Setup = setup.Classify(scored)
+			scored.ReviewChecklist = scored.Setup.ReviewChecklist
 			recordSignalSnapshot(context.WithoutCancel(r.Context()), outcomeRecorder, scored)
 			// Persist actionable BUY/READY signals to DB and emit console line.
 			if scored.IsActionable && (scored.Decision == "BUY" || scored.Decision == "READY") {

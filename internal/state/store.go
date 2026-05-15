@@ -55,6 +55,7 @@ package state
 
 import (
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -64,6 +65,8 @@ import (
 
 // Configurable limits — defined as package-level constants so they appear in one place.
 const (
+	pumpFunProgramID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+
 	// MaxBuyHistoryPerToken is the maximum number of timed buy records kept per token.
 	// When exceeded, the oldest entry is evicted.
 	MaxBuyHistoryPerToken = 500
@@ -154,6 +157,9 @@ func (s *Store) Apply(ev model.SwapEvent) bool {
 	}
 
 	st.totalEventCount++
+	if ev.ProgramID == pumpFunProgramID || strings.Contains(strings.ToLower(ev.ProgramID), "pump") {
+		st.isPumpFun = true
+	}
 	st.appendTradeEvent(ev)
 
 	if ev.IsBuy {
@@ -491,6 +497,7 @@ type tokenState struct {
 	launchDetectedAt     time.Time
 	launchSlot           uint64
 	launchEvidenceSource string
+	isPumpFun            bool
 	creatorWallet        string
 	tradeHistory         []model.TokenTradeEvent
 }
@@ -595,6 +602,7 @@ func deriveSnapshot(st *tokenState, now time.Time) model.TokenSnapshot {
 		ObservedFirstSeenAt:  st.FirstSeenAt,
 		ObservedAgeSeconds:   age,
 		LaunchDetectedAt:     launchDetectedAt,
+		LaunchTime:           launchDetectedAt,
 		LaunchSlot:           st.launchSlot,
 		LaunchAgeSeconds:     launchAgeSeconds,
 		LaunchConfidence:     launchConfidence,
@@ -642,6 +650,7 @@ func deriveSnapshot(st *tokenState, now time.Time) model.TokenSnapshot {
 		MarketCapReason: marketCapReason,
 		ShadowFeatures:  shadowFeatureInputs(st, now),
 		TradeHistory:    append([]model.TokenTradeEvent(nil), st.tradeHistory...),
+		IsPumpFun:       st.isPumpFun,
 	}
 }
 

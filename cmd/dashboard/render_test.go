@@ -192,6 +192,47 @@ func TestRenderIndexHTML_ReviewCandidateSurfacesInHero(t *testing.T) {
 	}
 }
 
+func TestRenderIndexHTML_LiveModeFallsBackWhenIngestorSlow(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(2 * time.Second)
+		_ = json.NewEncoder(w).Encode([]map[string]any{sampleLiveRow()})
+	}))
+	defer upstream.Close()
+
+	app := &App{cfg: dashConfig{liveMode: true, ingestorURL: upstream.URL}}
+	start := time.Now()
+	html := app.renderIndexHTML()
+	if elapsed := time.Since(start); elapsed > 1500*time.Millisecond {
+		t.Fatalf("renderIndexHTML took %s, want fast fallback", elapsed)
+	}
+	if !strings.Contains(html, "ANTI-BULLSHIT RUNNER INTELLIGENCE") {
+		t.Fatalf("root shell missing: %s", html)
+	}
+}
+
+func TestRenderWowLockedRows_MissingSetupAndAuthenticityAreSafe(t *testing.T) {
+	html := renderWowLockedRows([]map[string]any{{
+		"mint": "MISSINGFIELDS123456789",
+	}}, true)
+	if !strings.Contains(html, "MISSING") {
+		t.Fatalf("row did not render missing-field token safely: %s", html)
+	}
+}
+
+func TestRenderWowLockedRows_ReviewCandidateMissingEvidenceSafe(t *testing.T) {
+	row := map[string]any{
+		"mint":  "REVIEWMISSING123456789",
+		"setup": map[string]any{"mode": "REVIEW_CANDIDATE", "action": "WATCH_1M", "proxy_score": 88.0},
+	}
+	html := renderWowLockedRows([]map[string]any{row}, false)
+	if !strings.Contains(html, "REVIEW_CANDIDATE") {
+		t.Fatalf("review candidate row missing: %s", html)
+	}
+	if !strings.Contains(html, "REVIEW 1M") {
+		t.Fatalf("review action missing: %s", html)
+	}
+}
+
 func TestChooseBestSetupGo_DeadSetupCannotBecomeHero(t *testing.T) {
 	dead := sampleLiveRow()
 	dead["setup"] = map[string]any{"mode": "DEAD", "action": "NO_TRADE", "proxy_score": 0.0}

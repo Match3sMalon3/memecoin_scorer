@@ -80,7 +80,15 @@ type SetupResult struct {
 	BlockerSeverity   string         `json:"blocker_severity"`
 	Reviewable        bool           `json:"reviewable"`
 	ReviewReason      string         `json:"review_reason"`
+	ReviewChecklist   []string       `json:"review_checklist,omitempty"`
 	Invalidation      []string       `json:"invalidation"`
+}
+
+type CatalystResult struct {
+	Status     string   `json:"status"` // confirmed | weak | unknown
+	Source     string   `json:"source"` // metadata | deployer_history | manual | unknown
+	Reasons    []string `json:"reasons"`
+	Confidence float64  `json:"confidence"`
 }
 
 type BuyEvent struct {
@@ -256,6 +264,7 @@ type TokenSnapshot struct {
 	ObservedAgeSeconds   float64          `json:"observed_age_seconds"`
 	ObservedFirstSeenAt  time.Time        `json:"observed_first_seen_at"`
 	LaunchDetectedAt     *time.Time       `json:"launch_detected_at,omitempty"`
+	LaunchTime           *time.Time       `json:"launch_time,omitempty"`
 	LaunchSlot           uint64           `json:"launch_slot,omitempty"`
 	LaunchAgeSeconds     *float64         `json:"launch_age_seconds,omitempty"`
 	LaunchConfidence     LaunchConfidence `json:"launch_confidence"`
@@ -381,6 +390,7 @@ type TokenSnapshot struct {
 	// availability-marked live features for the shadow validated scorer bridge.
 	ShadowFeatures ShadowFeatureInputs `json:"-"`
 	TradeHistory   []TokenTradeEvent   `json:"-"`
+	IsPumpFun      bool                `json:"is_pump_fun"`
 
 	// MigrationEventAt is nil until a verified migration event is observed.
 	MigrationEventAt *time.Time `json:"migration_event_at,omitempty"`
@@ -501,8 +511,12 @@ type LiveSnapshot struct {
 	Setup                    SetupResult        `json:"setup"`
 	SolPerTrade5m            float64            `json:"sol_per_trade_5m"`
 	SolPerUniqueBuyer5m      float64            `json:"sol_per_unique_buyer_5m"`
-	BondingCurveProgressPct  float64            `json:"bonding_curve_progress_pct,omitempty"`
-	BondingVelocitySolPerMin float64            `json:"bonding_velocity_sol_per_min,omitempty"`
+	BondingCurveProgressPct  float64            `json:"bonding_curve_progress_pct"`
+	BondingVelocitySolPerMin float64            `json:"bonding_velocity_sol_per_min"`
+	TradesToReachCurrentVsol int                `json:"trades_to_reach_current_vsol"`
+	GraduationProximityPct   float64            `json:"graduation_proximity_pct"`
+	Catalyst                 CatalystResult     `json:"catalyst"`
+	ReviewChecklist          []string           `json:"review_checklist,omitempty"`
 	SOLPerTrade5m            float64            `json:"-"`
 
 	BotFlags                 []string `json:"bot_flags"`

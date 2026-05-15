@@ -40,6 +40,7 @@ func Classify(s model.LiveSnapshot) model.SetupResult {
 		result.Mode = model.SetupReviewCandidate
 		result.Reviewable = true
 		result.ReviewReason = reviewReason(s, blockers)
+		result.ReviewChecklist = reviewChecklist()
 		result.Reasons = append(result.Reasons, "high-score setup requires operator review before WOW")
 	case hasAvoidBlocker(blockers):
 		result.Mode = model.SetupAvoid
@@ -331,6 +332,17 @@ func reviewReason(s model.LiveSnapshot, blockers []blocker) string {
 	return "strong flow, blocked from WOW by " + strings.Join(soft, " and ")
 }
 
+func reviewChecklist() []string {
+	return []string{
+		"Open GMGN",
+		"Confirm catalyst/social origin",
+		"Check 1m candles for mechanical rhythm",
+		"Confirm holder distribution is improving",
+		"Watch next 60 seconds of buyer flow",
+		"Paper log outcome",
+	}
+}
+
 func wowLaunch(s model.LiveSnapshot) bool {
 	return s.TokenMode == model.TokenModeLaunch &&
 		hasLaunchConfidence(s) &&
@@ -351,9 +363,11 @@ func hasLaunchConfidence(s model.LiveSnapshot) bool {
 
 func wowBonding(s model.LiveSnapshot) bool {
 	return s.TokenMode == model.TokenModeBonding &&
+		s.IsPumpFun &&
 		s.BondingCurveProgressPct > 30 &&
 		s.BondingVelocitySolPerMin >= 0.1 &&
 		authLowOrNone(s) &&
+		s.ClusteringRowStatus != "full_fallback" &&
 		distributionWOWAllowed(s) &&
 		liquidityReliableForWOW(s)
 }
@@ -407,6 +421,9 @@ func unknownCatalyst(s model.LiveSnapshot) bool {
 	case model.TokenModeLaunch, model.TokenModeBonding, model.TokenModeMigration:
 		return false
 	case model.TokenModeRevival:
+		if s.Catalyst.Status == "weak" || s.Catalyst.Status == "confirmed" {
+			return false
+		}
 		return s.LaunchConfidence == model.LaunchConfidenceUnknown &&
 			s.MigrationEventAt == nil &&
 			s.BondingCurveProgressPct <= 0
