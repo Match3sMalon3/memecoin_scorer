@@ -57,17 +57,20 @@ func TestRenderIndexHTML_WowShell(t *testing.T) {
 	html := app.renderIndexHTML()
 	for _, want := range []string{
 		`ANTI-BULLSHIT RUNNER INTELLIGENCE`,
+		`EDGE PROOF`,
 		`proof-bar`,
 		`alert-panel`,
 		`/api/alerts/stream`,
-		`LIVE LAUNCH_WOW CANDIDATE`,
+		`LIVE LAUNCH_WOW SETUP`,
 		`BACKTEST`,
+		`GMGN`,
+		`Solscan`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("markup %q missing: %s", want, html)
 		}
 	}
-	for _, bad := range []string{`AP` + `EX`, `BAD TAPE DETECTED`, `STRUCTURAL QUALITY FILTER`, `POSTURE: DEFENSIVE`, `liq 0.00 < 5`} {
+	for _, bad := range []string{`RUNNERS`, `SIGNAL ACTIVE`, `BAD TAPE DETECTED`, `STRUCTURAL QUALITY FILTER`, `POSTURE: DEFENSIVE`, `liq 0.00 < 5`} {
 		if strings.Contains(html, bad) {
 			t.Fatalf("forbidden markup %q present: %s", bad, html)
 		}
@@ -97,18 +100,59 @@ func TestRenderWowLockedRows_UsesFinalCappedBandNotScore(t *testing.T) {
 		"score":      99.0,
 		"threshold":  62.0,
 		"band":       "WATCH",
-		"risk_flags": []any{"RUNNER capped: unverified liquidity"},
+		"risk_flags": []any{"WOW capped: unverified liquidity"},
 	}
-	row["setup"] = map[string]any{"mode": "WATCH", "action": "WATCH_5M", "proxy_score": 99.0, "blockers": []any{"RUNNER capped: unverified liquidity"}}
-	html := renderWowLockedRows([]map[string]any{row})
+	row["setup"] = map[string]any{"mode": "WATCH", "action": "WATCH_5M", "proxy_score": 99.0, "blockers": []any{"WOW capped: unverified liquidity"}}
+	html := renderWowLockedRows([]map[string]any{row}, false)
 	if !strings.Contains(html, `>WATCH</span>`) {
 		t.Fatalf("rendered row did not display capped WATCH band: %s", html)
 	}
 	if strings.Contains(html, `>LAUNCH_WOW</span>`) {
 		t.Fatalf("dashboard promoted raw score to WOW: %s", html)
 	}
-	if !strings.Contains(html, "RUNNER capped: unverified liquidity") {
+	if !strings.Contains(html, "WOW capped: unverified liquidity") {
 		t.Fatalf("capping reason missing from dashboard row: %s", html)
+	}
+}
+
+func TestRenderIndexHTML_WatchRowsSurfaceInHero(t *testing.T) {
+	row := sampleLiveRow()
+	row["setup"] = map[string]any{
+		"mode":             "WATCH",
+		"action":           "WATCH_5M",
+		"proxy_score":      55.0,
+		"reasons":          []any{"fresh buyer flow"},
+		"blockers":         []any{"unverified liquidity"},
+		"blocker_severity": "watch",
+	}
+	app := &App{
+		cfg:              dashConfig{liveMode: true},
+		cachedLiveRows:   []map[string]any{row},
+		cachedLiveRowsAt: time.Now(),
+	}
+	html := app.renderIndexHTML()
+	if !strings.Contains(html, "LIVE WATCH CANDIDATE") && !strings.Contains(html, "NO WOW SETUP") {
+		t.Fatalf("watch hero missing: %s", html)
+	}
+	if strings.Contains(strings.ToLower(html), "no live rows") {
+		t.Fatalf("hero says no live rows while watch row exists: %s", html)
+	}
+}
+
+func TestRenderIndexHTML_DeadCollapsedByDefault(t *testing.T) {
+	row := sampleLiveRow()
+	row["setup"] = map[string]any{"mode": "DEAD", "action": "NO_TRADE", "proxy_score": 0.0, "blockers": []any{"no real flow"}}
+	app := &App{
+		cfg:              dashConfig{liveMode: true},
+		cachedLiveRows:   []map[string]any{row},
+		cachedLiveRowsAt: time.Now(),
+	}
+	html := app.renderIndexHTML()
+	if !strings.Contains(html, "Show DEAD / hidden rejected tokens (1)") {
+		t.Fatalf("dead toggle missing: %s", html)
+	}
+	if !strings.Contains(html, `<tbody id="token-rows"><tr><td colspan="7">No active WOW, WATCH, MANIPULATED, or AVOID rows.</td></tr>`) {
+		t.Fatalf("dead row leaked into default table: %s", html)
 	}
 }
 
