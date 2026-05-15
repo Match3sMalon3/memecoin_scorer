@@ -635,11 +635,17 @@ func makeSnapshotsHandler(store *state.Store, dbStore *db.Store, calibrationReco
 			}
 			if scored.BondingCurveProgressPct > 0 && scored.VSolPerMinute > 0 {
 				scored.BondingVelocitySolPerMin = scored.VSolPerMinute
+				scored.BondingEvidenceSource = "exact"
+			} else if scored.IsPumpFun && scored.ObservedAgeSeconds > 0 {
+				scored.BondingVelocitySolPerMin = bondingVelocityProxy(scored.TotalBuySOL, scored.ObservedAgeSeconds)
+				scored.BondingEvidenceSource = "flow_proxy"
+			} else {
+				scored.BondingEvidenceSource = "unknown"
 			}
 			if scored.BondingCurveProgressPct >= 0 {
 				scored.GraduationProximityPct = 100 - scored.BondingCurveProgressPct
 			}
-			scored.TradesToReachCurrentVsol = len(buys5m)
+			scored.TradesToReachCurrentVsol = len(store.GetBuyEvents(scored.Mint, 24*time.Hour))
 			proxy.ApplyAuthenticityEvidence(&scored)
 			scored.EarlyProxy = proxy.ScoreEarlyProxy(scored)
 			scored.TokenMode = mode.Classify(scored)
@@ -688,6 +694,17 @@ func recordSignalSnapshot(ctx context.Context, recorder signalSnapshotRecorder, 
 	if _, _, err := recorder.RecordSignalSnapshot(ctx, row); err != nil {
 		log.Printf("outcome snapshot record %s: %v", row.Mint, err)
 	}
+}
+
+func bondingVelocityProxy(totalBuySOL float64, observedAgeSeconds float64) float64 {
+	if totalBuySOL <= 0 || observedAgeSeconds <= 0 {
+		return 0
+	}
+	minutes := observedAgeSeconds / 60
+	if minutes < 1.0/60.0 {
+		minutes = 1.0 / 60.0
+	}
+	return totalBuySOL / minutes
 }
 
 func makeMarketContextHandler(store *state.Store, liveCfg live.LiveConfig) http.HandlerFunc {

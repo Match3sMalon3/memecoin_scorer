@@ -203,6 +203,43 @@ func TestReviewCandidateRejectsMediumAuthenticity(t *testing.T) {
 	}
 }
 
+func TestPumpFunInferredLaunchCanBecomeReviewCandidate(t *testing.T) {
+	row := setupRow(model.TokenModeLaunch, 88, "none")
+	row.IsPumpFun = true
+	row.LaunchConfidence = model.LaunchConfidenceInferred
+	row.LaunchAgeSeconds = floatPtr(60)
+	row.RealPoolDepthSOL = -1
+	row.LiquidityPoolSOL = 2
+	row.LiquidityProxyReliable = false
+	row.LiquidityEvidenceSource = "observed_swaps_proxy"
+	row.EstimatedImpactPct = 10
+	row.Top10HolderPct = 0.5
+	row.HolderCount = 20
+	row.BuyersLast1m = 3
+	row.BuyersLast5m = 6
+	row.ClusteringRowStatus = "partial_fallback"
+
+	got := Classify(row)
+	if got.Mode != model.SetupReviewCandidate {
+		t.Fatalf("mode=%s want REVIEW_CANDIDATE: %+v", got.Mode, got)
+	}
+	if got.Action == model.ActionEnterSmall || got.Action == model.ActionEnterAllowed {
+		t.Fatalf("review candidate got entry action: %+v", got)
+	}
+}
+
+func TestPumpFunInferredLaunchDoesNotBypassLaunchWOWProof(t *testing.T) {
+	row := setupRow(model.TokenModeLaunch, 88, "none")
+	row.IsPumpFun = true
+	row.LaunchConfidence = model.LaunchConfidenceInferred
+	row.LaunchAgeSeconds = floatPtr(60)
+	row.ClusteringRowStatus = "partial_fallback"
+
+	if got := Classify(row); got.Mode == model.SetupLaunchWOW {
+		t.Fatalf("partial fallback pump launch became LAUNCH_WOW: %+v", got)
+	}
+}
+
 func setupRow(tokenMode model.TokenMode, score float64, severity string) model.LiveSnapshot {
 	row := model.LiveSnapshot{
 		TokenSnapshot: model.TokenSnapshot{

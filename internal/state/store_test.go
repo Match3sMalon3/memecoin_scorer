@@ -100,6 +100,63 @@ func TestStore_FirstObservedBuyerIsNotCreatorWithoutLaunchEvidence(t *testing.T)
 	}
 }
 
+func TestStore_PumpMintSuffixSetsEvidenceAndInferredLaunch(t *testing.T) {
+	now := epoch.Add(30 * time.Second)
+	s := state.NewWithClock(func() time.Time { return now })
+	mint := "PumpSuffix111111111111111111111111111111pump"
+	ev := makeBuy("sig_pump_suffix", "buyer", mint, epoch, 2.0)
+	ev.Slot = 456
+	s.Apply(ev)
+
+	snap, ok := s.Snapshot(mint)
+	if !ok {
+		t.Fatal("expected snapshot")
+	}
+	if !snap.IsPumpFun {
+		t.Fatalf("is_pump_fun=false, want true")
+	}
+	if snap.PumpFunEvidenceSource != "mint_suffix" {
+		t.Fatalf("pump_fun_evidence_source=%q, want mint_suffix", snap.PumpFunEvidenceSource)
+	}
+	if snap.LaunchConfidence != model.LaunchConfidenceInferred {
+		t.Fatalf("launch_confidence=%q, want inferred", snap.LaunchConfidence)
+	}
+	if snap.LaunchEvidenceSource != "pump_fun_first_seen" || snap.LaunchSlot != 456 || snap.LaunchTime == nil {
+		t.Fatalf("launch evidence not inferred from first seen: %+v", snap)
+	}
+}
+
+func TestStore_NonPumpMintRemainsUnknownWithoutProgramEvidence(t *testing.T) {
+	s := state.NewWithClock(func() time.Time { return epoch.Add(time.Minute) })
+	s.Apply(makeBuy("sig_non_pump", "buyer", "NotPump11111111111111111111111111111111111", epoch, 1.0))
+
+	snap, ok := s.Snapshot("NotPump11111111111111111111111111111111111")
+	if !ok {
+		t.Fatal("expected snapshot")
+	}
+	if snap.IsPumpFun {
+		t.Fatalf("non-pump mint became pump.fun: %+v", snap)
+	}
+	if snap.LaunchConfidence != model.LaunchConfidenceUnknown {
+		t.Fatalf("launch_confidence=%q, want unknown", snap.LaunchConfidence)
+	}
+}
+
+func TestStore_ProgramEvidenceSetsPumpFun(t *testing.T) {
+	s := state.NewWithClock(func() time.Time { return epoch.Add(time.Minute) })
+	ev := makeBuy("sig_program_pump", "buyer", testMint, epoch, 1.0)
+	ev.ProgramID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+	s.Apply(ev)
+
+	snap, ok := s.Snapshot(testMint)
+	if !ok {
+		t.Fatal("expected snapshot")
+	}
+	if !snap.IsPumpFun || snap.PumpFunEvidenceSource != "program_id" {
+		t.Fatalf("pump.fun program evidence missing: %+v", snap)
+	}
+}
+
 // ---- Unique buyer counting ----
 
 func TestStore_UniqueBuyerCounting(t *testing.T) {

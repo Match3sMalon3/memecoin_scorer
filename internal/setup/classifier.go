@@ -270,7 +270,9 @@ func reviewCandidate(s model.LiveSnapshot, blockers []blocker) bool {
 }
 
 func liquidityEnoughForReview(s model.LiveSnapshot) bool {
-	return s.RealPoolDepthSOL >= 5 || s.LiquidityEvidenceSource == "raydium_wsol_vault"
+	return s.RealPoolDepthSOL >= 5 ||
+		s.LiquidityEvidenceSource == "raydium_wsol_vault" ||
+		(s.IsPumpFun && s.LaunchConfidence == model.LaunchConfidenceInferred && s.RealPoolDepthSOL != 0 && s.LiquidityPoolSOL > 0)
 }
 
 func hasReviewFlow(s model.LiveSnapshot) bool {

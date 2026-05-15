@@ -157,8 +157,11 @@ func (s *Store) Apply(ev model.SwapEvent) bool {
 	}
 
 	st.totalEventCount++
-	if ev.ProgramID == pumpFunProgramID || strings.Contains(strings.ToLower(ev.ProgramID), "pump") {
+	if source := pumpFunEvidenceSource(ev); source != "unknown" {
 		st.isPumpFun = true
+		if st.pumpFunEvidenceSource == "" || st.pumpFunEvidenceSource == "unknown" {
+			st.pumpFunEvidenceSource = source
+		}
 	}
 	st.appendTradeEvent(ev)
 
@@ -491,15 +494,16 @@ type tokenState struct {
 	// -1 = not yet available; >= 0 = verified depth. Updated by UpdateDepth.
 	realPoolDepthSOL float64
 	// realDepthSource is the evidence source label when realPoolDepthSOL >= 0.
-	realDepthSource      string
-	firstSeenSlot        uint64
-	firstObservedAt      time.Time
-	launchDetectedAt     time.Time
-	launchSlot           uint64
-	launchEvidenceSource string
-	isPumpFun            bool
-	creatorWallet        string
-	tradeHistory         []model.TokenTradeEvent
+	realDepthSource       string
+	firstSeenSlot         uint64
+	firstObservedAt       time.Time
+	launchDetectedAt      time.Time
+	launchSlot            uint64
+	launchEvidenceSource  string
+	isPumpFun             bool
+	pumpFunEvidenceSource string
+	creatorWallet         string
+	tradeHistory          []model.TokenTradeEvent
 }
 
 type timestampedBuy struct {
@@ -571,13 +575,11 @@ func deriveSnapshot(st *tokenState, now time.Time) model.TokenSnapshot {
 		lastPriceReason = "no priced swap observed yet"
 	}
 
-	// FirstSeenAt is only this ingestor's observed first seen time. Do not promote
-	// it to launch time unless a future mint/pool creation signal explicitly sets
-	// st.launchDetectedAt and st.launchEvidenceSource.
 	var launchDetectedAt *time.Time
 	var launchAgeSeconds *float64
 	launchConfidence := model.LaunchConfidenceUnknown
 	launchEvidenceSource := "unknown"
+	launchSlot := st.launchSlot
 	if !st.launchDetectedAt.IsZero() {
 		detected := st.launchDetectedAt
 		launchDetectedAt = &detected
@@ -592,6 +594,20 @@ func deriveSnapshot(st *tokenState, now time.Time) model.TokenSnapshot {
 		} else {
 			launchEvidenceSource = "pool_creation_tx"
 		}
+	} else if st.isPumpFun && st.firstObservedAt.Sub(st.FirstSeenAt) <= 60*time.Second {
+		// Inferred launch is only for Pump.fun rows where this store has no
+		// older event than its first observation. Exact mint-create evidence
+		// remains reserved for future create-event coverage.
+		detected := st.FirstSeenAt
+		launchDetectedAt = &detected
+		age := now.Sub(detected).Seconds()
+		if age < 0 {
+			age = 0
+		}
+		launchAgeSeconds = &age
+		launchConfidence = model.LaunchConfidenceInferred
+		launchEvidenceSource = "pump_fun_first_seen"
+		launchSlot = st.firstSeenSlot
 	}
 
 	return model.TokenSnapshot{
@@ -603,7 +619,7 @@ func deriveSnapshot(st *tokenState, now time.Time) model.TokenSnapshot {
 		ObservedAgeSeconds:   age,
 		LaunchDetectedAt:     launchDetectedAt,
 		LaunchTime:           launchDetectedAt,
-		LaunchSlot:           st.launchSlot,
+		LaunchSlot:           launchSlot,
 		LaunchAgeSeconds:     launchAgeSeconds,
 		LaunchConfidence:     launchConfidence,
 		LaunchEvidenceSource: launchEvidenceSource,
@@ -644,14 +660,40 @@ func deriveSnapshot(st *tokenState, now time.Time) model.TokenSnapshot {
 		// totalTokensHeld = sum of positive walletNetTokens values (lower-bound observable supply).
 		// This proxy understates true MC (excludes tokens in pools or not yet traded), but
 		// it is non-zero after the first buy and makes Gates 1 and 4 evaluable without an RPC.
-		LastPriceSOL:    st.lastPriceSOL,
-		LastPriceReason: lastPriceReason,
-		MarketCapSOL:    marketCap,
-		MarketCapReason: marketCapReason,
-		ShadowFeatures:  shadowFeatureInputs(st, now),
-		TradeHistory:    append([]model.TokenTradeEvent(nil), st.tradeHistory...),
-		IsPumpFun:       st.isPumpFun,
+		LastPriceSOL:          st.lastPriceSOL,
+		LastPriceReason:       lastPriceReason,
+		MarketCapSOL:          marketCap,
+		MarketCapReason:       marketCapReason,
+		ShadowFeatures:        shadowFeatureInputs(st, now),
+		TradeHistory:          append([]model.TokenTradeEvent(nil), st.tradeHistory...),
+		IsPumpFun:             st.isPumpFun,
+		PumpFunEvidenceSource: firstNonEmpty(st.pumpFunEvidenceSource, "unknown"),
 	}
+}
+
+func pumpFunEvidenceSource(ev model.SwapEvent) string {
+	if ev.PumpFunEvidenceSource != "" && ev.PumpFunEvidenceSource != "unknown" {
+		return ev.PumpFunEvidenceSource
+	}
+	if strings.HasSuffix(strings.ToLower(ev.TokenMint), "pump") {
+		return "mint_suffix"
+	}
+	if ev.ProgramID == pumpFunProgramID {
+		return "program_id"
+	}
+	if strings.Contains(strings.ToLower(ev.ProgramID+" "+ev.HeliusSource+" "+ev.ProgramName), "pump") {
+		return "helius_source"
+	}
+	return "unknown"
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func shadowFeatureInputs(st *tokenState, now time.Time) model.ShadowFeatureInputs {

@@ -127,28 +127,70 @@ func toSwapEvent(tx *heliusTx) (model.SwapEvent, bool) {
 	}
 
 	programID := tx.Source
+	programName := ""
+	heliusSource := tx.Source
 	if sw.ProgramInfo != nil && sw.ProgramInfo.Account != "" {
 		programID = sw.ProgramInfo.Account
+		programName = sw.ProgramInfo.ProgramName
+		if sw.ProgramInfo.Source != "" {
+			heliusSource = sw.ProgramInfo.Source
+		}
 	}
 
 	poolAccount := extractPoolAccount(tx)
+	pumpEvidence := pumpFunEvidenceSource(mint, programID, heliusSource, programName, poolAccount, tx)
 	if poolAccount == "" && strings.EqualFold(tx.Source, "RAYDIUM") {
 		poolAccount = extractWSOLVaultFromTransfers(tx, isBuy)
 	}
 
 	return model.SwapEvent{
-		Signature:        tx.Signature,
-		Slot:             tx.Slot,
-		BlockTime:        time.Unix(tx.Timestamp, 0).UTC(),
-		TokenMint:        mint,
-		IsBuy:            isBuy,
-		WalletAddr:       tx.FeePayer,
-		SOLAmount:        sol,
-		TokenAmount:      tokenAmount,
-		ProgramID:        programID,
-		PoolAccountAddr:  poolAccount,
-		RealPoolDepthSOL: -1, // pc_vault lookup not yet implemented; see docs/real_liquidity_discovery_gap.md
+		Signature:             tx.Signature,
+		Slot:                  tx.Slot,
+		BlockTime:             time.Unix(tx.Timestamp, 0).UTC(),
+		TokenMint:             mint,
+		IsBuy:                 isBuy,
+		WalletAddr:            tx.FeePayer,
+		SOLAmount:             sol,
+		TokenAmount:           tokenAmount,
+		ProgramID:             programID,
+		PoolAccountAddr:       poolAccount,
+		HeliusSource:          heliusSource,
+		ProgramName:           programName,
+		PumpFunEvidenceSource: pumpEvidence,
+		RealPoolDepthSOL:      -1, // pc_vault lookup not yet implemented; see docs/real_liquidity_discovery_gap.md
 	}, true
+}
+
+func pumpFunEvidenceSource(mint, programID, source, programName, poolAccount string, tx *heliusTx) string {
+	if strings.HasSuffix(strings.ToLower(mint), "pump") {
+		return "mint_suffix"
+	}
+	if programID == pumpFun {
+		return "program_id"
+	}
+	if strings.Contains(strings.ToLower(source+" "+programName+" "+tx.Source+" "+tx.Type), "pump") {
+		return "helius_source"
+	}
+	if poolAccount != "" && hasPumpFunInstruction(tx) {
+		return "bonding_curve"
+	}
+	return "unknown"
+}
+
+func hasPumpFunInstruction(tx *heliusTx) bool {
+	for _, instr := range tx.Instructions {
+		if instr.ProgramId == pumpFun {
+			return true
+		}
+	}
+	for _, inner := range tx.InnerInstructions {
+		for _, instr := range inner.Instructions {
+			if instr.ProgramId == pumpFun {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // parseLamports converts a lamport string to SOL.

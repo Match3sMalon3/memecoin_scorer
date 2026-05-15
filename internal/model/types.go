@@ -129,6 +129,16 @@ type SwapEvent struct {
 	// See docs/real_liquidity_discovery_gap.md for the full extraction gap analysis.
 	PoolAccountAddr string
 
+	// HeliusSource and ProgramName preserve enhanced-transaction source labels
+	// so downstream evidence classifiers can identify Pump.fun even when the
+	// low-level program account is absent from the swap event.
+	HeliusSource string
+	ProgramName  string
+
+	// PumpFunEvidenceSource is one of: mint_suffix, program_id, helius_source,
+	// bonding_curve, unknown.
+	PumpFunEvidenceSource string
+
 	// RealPoolDepthSOL is the executable on-chain reserve depth in SOL.
 	// -1 = unavailable; the system falls back to the observed_swaps_proxy.
 	// >= 0 = verified depth from a pc_vault balance query (not yet implemented).
@@ -388,9 +398,10 @@ type TokenSnapshot struct {
 
 	// ShadowFeatures is intentionally not serialized. It carries observed,
 	// availability-marked live features for the shadow validated scorer bridge.
-	ShadowFeatures ShadowFeatureInputs `json:"-"`
-	TradeHistory   []TokenTradeEvent   `json:"-"`
-	IsPumpFun      bool                `json:"is_pump_fun"`
+	ShadowFeatures        ShadowFeatureInputs `json:"-"`
+	TradeHistory          []TokenTradeEvent   `json:"-"`
+	IsPumpFun             bool                `json:"is_pump_fun"`
+	PumpFunEvidenceSource string              `json:"pump_fun_evidence_source"`
 
 	// MigrationEventAt is nil until a verified migration event is observed.
 	MigrationEventAt *time.Time `json:"migration_event_at,omitempty"`
@@ -513,6 +524,7 @@ type LiveSnapshot struct {
 	SolPerUniqueBuyer5m      float64            `json:"sol_per_unique_buyer_5m"`
 	BondingCurveProgressPct  float64            `json:"bonding_curve_progress_pct"`
 	BondingVelocitySolPerMin float64            `json:"bonding_velocity_sol_per_min"`
+	BondingEvidenceSource    string             `json:"bonding_evidence_source"`
 	TradesToReachCurrentVsol int                `json:"trades_to_reach_current_vsol"`
 	GraduationProximityPct   float64            `json:"graduation_proximity_pct"`
 	Catalyst                 CatalystResult     `json:"catalyst"`

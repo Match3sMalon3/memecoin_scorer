@@ -675,6 +675,15 @@ func TestLiveConfigFromEnv_InvalidValues_FallbackToDefault(t *testing.T) {
 	}
 }
 
+func TestBondingVelocityProxy(t *testing.T) {
+	if got := bondingVelocityProxy(6, 120); got != 3 {
+		t.Fatalf("bondingVelocityProxy=%.2f, want 3.00", got)
+	}
+	if got := bondingVelocityProxy(0, 120); got != 0 {
+		t.Fatalf("zero total velocity=%.2f, want 0", got)
+	}
+}
+
 // ---- port resolution ----
 
 func TestResolveIngestorPort_Default(t *testing.T) {
