@@ -36,6 +36,11 @@ func Classify(s model.LiveSnapshot) model.SetupResult {
 	case manipulatedMomentum(s):
 		result.Mode = model.SetupManipulatedMomentum
 		result.Reasons = append(result.Reasons, s.Authenticity.Flags...)
+	case reviewCandidate(s, blockers):
+		result.Mode = model.SetupReviewCandidate
+		result.Reviewable = true
+		result.ReviewReason = reviewReason(s, blockers)
+		result.Reasons = append(result.Reasons, "high-score setup requires operator review before WOW")
 	case hasAvoidBlocker(blockers):
 		result.Mode = model.SetupAvoid
 	case wowLaunch(s):
@@ -222,6 +227,8 @@ func assignAction(result *model.SetupResult) {
 	switch result.Mode {
 	case model.SetupLaunchWOW, model.SetupBondingWOW, model.SetupMigrationWOW, model.SetupRevivalWOW:
 		result.Action = model.ActionPaperLog
+	case model.SetupReviewCandidate:
+		result.Action = model.ActionWatch1M
 	case model.SetupManipulatedMomentum:
 		result.Action = model.ActionExitAvoid
 	case model.SetupWatch:
@@ -241,6 +248,87 @@ func manipulatedMomentum(s model.LiveSnapshot) bool {
 	return (s.Authenticity.Severity == "high" || s.Authenticity.Severity == "medium") &&
 		s.EarlyProxy.Score >= 50 &&
 		velocityBonus(s) > 0
+}
+
+func reviewCandidate(s model.LiveSnapshot, blockers []blocker) bool {
+	if s.EarlyProxy.Score < 75 ||
+		s.Authenticity.Score < 80 ||
+		!authLowOrNone(s) ||
+		!liquidityEnoughForReview(s) ||
+		s.EstimatedImpactPct >= 50 ||
+		!hasReviewFlow(s) ||
+		s.Top10HolderPct >= 0.95 {
+		return false
+	}
+	for _, b := range blockers {
+		if hardReviewBlocker(b.text) {
+			return false
+		}
+	}
+	return hasReviewableBlocker(blockers)
+}
+
+func liquidityEnoughForReview(s model.LiveSnapshot) bool {
+	return s.RealPoolDepthSOL >= 5 || s.LiquidityEvidenceSource == "raydium_wsol_vault"
+}
+
+func hasReviewFlow(s model.LiveSnapshot) bool {
+	return s.BuyersLast1m > 0 || s.BuyersLast5m >= 5
+}
+
+func hardReviewBlocker(text string) bool {
+	switch {
+	case text == "no real flow":
+		return true
+	case strings.Contains(text, "terminal holder concentration"):
+		return true
+	case strings.Contains(text, "full clustering fallback"):
+		return true
+	case strings.Contains(text, "verified pool depth below 5"):
+		return true
+	case strings.Contains(text, "estimated impact >= 50"):
+		return true
+	case strings.Contains(text, "bundle bot"):
+		return true
+	case strings.Contains(text, "bump bot"):
+		return true
+	case strings.Contains(text, "mechanical rhythm"):
+		return true
+	default:
+		return false
+	}
+}
+
+func hasReviewableBlocker(blockers []blocker) bool {
+	for _, b := range blockers {
+		switch {
+		case b.text == "partial clustering fallback":
+			return true
+		case b.text == "unknown catalyst":
+			return true
+		case strings.Contains(b.text, "high holder concentration"):
+			return true
+		case strings.Contains(b.text, "near-terminal holder concentration"):
+			return true
+		}
+	}
+	return false
+}
+
+func reviewReason(s model.LiveSnapshot, blockers []blocker) string {
+	var soft []string
+	for _, b := range blockers {
+		if !hardReviewBlocker(b.text) && (b.text == "partial clustering fallback" || b.text == "unknown catalyst" || strings.Contains(b.text, "holder concentration")) {
+			soft = append(soft, b.text)
+		}
+	}
+	if len(soft) == 0 {
+		return "strong score, needs operator confirmation"
+	}
+	if s.TokenMode == model.TokenModeRevival {
+		return "strong revival demand, blocked from WOW by " + strings.Join(soft, " and ")
+	}
+	return "strong flow, blocked from WOW by " + strings.Join(soft, " and ")
 }
 
 func wowLaunch(s model.LiveSnapshot) bool {

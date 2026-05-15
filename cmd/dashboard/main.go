@@ -234,20 +234,23 @@ func (a *App) handleMarketContext(w http.ResponseWriter, _ *http.Request) {
 	}
 	livePrecision, liveTotal := 0.0, 0
 	wowCount := counts["LAUNCH_WOW"] + counts["BONDING_WOW"] + counts["MIGRATION_WOW"] + counts["REVIVAL_WOW"]
+	reviewCount := counts["REVIEW_CANDIDATE"]
 	watch := counts["WATCH"]
 	posture := "SCANNING"
 	if wowCount > 0 {
 		posture = "WOW ACTIVE"
+	} else if reviewCount > 0 {
+		posture = "REVIEW ACTIVE"
 	} else if watch > 0 {
 		posture = "WATCH ACTIVE"
-	} else if best < 45 {
-		posture = "NO LIVE SETUP"
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"tokens_seen_today":        seen,
 		"tokens_watched_today":     watch,
+		"tokens_review_today":      reviewCount,
 		"tokens_wow_today":         wowCount,
 		"wow_count":                wowCount,
+		"review_count":             reviewCount,
 		"watch_count":              watch,
 		"manipulated_count":        counts["MANIPULATED_MOMENTUM"],
 		"avoid_count":              counts["AVOID"],
@@ -933,13 +936,13 @@ func renderWowLockedHTML(rows []map[string]any) string {
 	proof := renderEdgeProofPanel(rows)
 	deadCount := counts["DEAD"]
 	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ANTI-BULLSHIT RUNNER INTELLIGENCE</title><style>
-body{margin:0;background:#050505;color:#e5e7eb;font-family:"JetBrains Mono",monospace;font-size:11px}a{color:#60a5fa}.shell{min-height:100vh}.hero{margin:0;padding:24px 22px;border-bottom:1px solid #262626;display:grid;grid-template-columns:minmax(260px,1.1fr) minmax(260px,1fr);gap:18px}.hero h1{margin:0 0 10px;font-size:28px;line-height:1.05}.hero h2{font-size:14px;margin:0 0 12px;color:#cbd5e1}.hero ul{margin:6px 0 0;padding-left:18px}.hero-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.hero-actions a,.hero-actions button{border:1px solid #334155;background:#0b1220;color:#bfdbfe;padding:7px 10px;border-radius:4px;text-decoration:none;font:inherit}.hero-wow{box-shadow:inset 6px 0 0 #16a34a}.hero-watch{box-shadow:inset 6px 0 0 #eab308}.hero-manipulated{box-shadow:inset 6px 0 0 #f97316}.hero-empty{box-shadow:inset 6px 0 0 #ef4444}.edge-proof{display:flex;justify-content:space-between;gap:16px;padding:14px 22px;border-bottom:1px solid #1c1c1c;background:#080808}.edge-proof h2{margin:0 0 6px;font-size:13px;color:#f8fafc}.proof-grid{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:14px}.proof-link{align-self:center;border:1px solid #334155;padding:7px 10px;border-radius:4px;text-decoration:none}.scan-table{width:100%;border-collapse:collapse}.scan-table th,.scan-table td{padding:8px;border-bottom:1px solid #1c1c1c;text-align:left}.scan-table tr.mode-dead{opacity:.62}.badge{border:1px solid #333;border-radius:3px;padding:3px 7px;font-weight:800}.mode-launch_wow,.mode-bonding_wow,.mode-migration_wow,.mode-revival_wow{color:#22c55e}.mode-manipulated_momentum{color:#f97316}.mode-watch{color:#eab308}.mode-avoid{color:#ef4444}.mode-dead{color:#6b7280}.drawer{display:none}tr:focus .drawer,tr:hover .drawer{display:block;position:absolute;background:#090909;border:1px solid #333;padding:10px;max-width:620px;z-index:20}
-#proof-bar{background:#000;border-bottom:1px solid #1c1c1c;padding:6px 14px;font-family:monospace;font-size:10px;color:#5a6070;display:flex;gap:10px;align-items:center;letter-spacing:.05em}#proof-bar b{color:#e0e0e0}.pb-sep{color:#333}.pb-posture{font-weight:700;margin-left:auto}.pb-posture.wow-active{color:#4ade80}.pb-posture.watch-active{color:#fbbf24}.pb-posture.scanning{color:#fbbf24}.pb-posture.no-live-setup{color:#f87171}.live-dot.live{color:#4ade80;animation:pulse 2s infinite}.live-dot.stale{color:#fbbf24}.live-dot.dead{color:#f87171}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-#alert-panel{position:fixed;top:60px;right:14px;z-index:999;display:flex;flex-direction:column;gap:8px;max-width:340px}.live-alert{background:#0a1f0c;border:2px solid #16a34a;border-radius:4px;padding:12px;font-family:'JetBrains Mono',monospace;font-size:11px;color:#e2e2e2;animation:slideIn .3s ease;box-shadow:0 0 16px rgba(34,197,94,.4)}.live-alert.pinned{border-color:#4ade80;box-shadow:0 0 24px rgba(74,222,128,.6)}.la-band{font-weight:700;color:#4ade80;letter-spacing:.1em;margin-bottom:6px;font-size:10px}.la-name{font-size:13px;font-weight:700;color:#fff}.la-score{float:right;color:#a78bfa;font-weight:700}.la-reasons{color:#d1d5db;margin:6px 0;line-height:1.5}.la-risks{color:#fbbf24;font-size:10px;margin-bottom:4px}.la-inval{color:#f87171;font-size:10px;margin-bottom:6px}.la-actions{display:flex;gap:6px;margin-top:6px}.la-actions a,.la-actions button{background:transparent;border:1px solid #1d4ed8;color:#60a5fa;padding:4px 8px;border-radius:3px;font-size:10px;text-decoration:none;cursor:pointer;font-family:inherit}.la-actions a:hover,.la-actions button:hover{background:#0a0f1f}.la-meta{color:#5a6070;font-size:10px;margin-top:6px;border-top:1px solid #1c1c1c;padding-top:6px}.dead-toggle{padding:10px 14px;border-top:1px solid #1c1c1c}.dead-toggle summary{cursor:pointer;color:#9ca3af;font-weight:800}@keyframes slideIn{from{transform:translateX(360px);opacity:0}to{transform:translateX(0);opacity:1}}@media(max-width:760px){.hero,.edge-proof{grid-template-columns:1fr;display:block}.proof-grid{grid-template-columns:1fr}}</style></head><body><div class="shell"><div id="alert-panel"></div><div id="proof-bar"><span id="live-dot" class="live-dot live">●</span><span id="last-update-secs">0s ago</span><span class="pb-sep">·</span><span class="pb-item">SCANNED: <b id="pb-seen">` + fmt.Sprintf("%d", len(rows)) + `</b></span><span class="pb-sep">·</span><span class="pb-item">WATCH: <b id="pb-watch">` + fmt.Sprintf("%d", counts["WATCH"]) + `</b></span><span class="pb-sep">·</span><span class="pb-item">WOW: <b id="pb-wow">` + fmt.Sprintf("%d", counts["LAUNCH_WOW"]+counts["BONDING_WOW"]+counts["MIGRATION_WOW"]+counts["REVIVAL_WOW"]) + `</b></span><span class="pb-sep">·</span><span class="pb-item">LIVE PRECISION: <b id="pb-prec">pending</b> (n=<b id="pb-n">0</b>)</span><span class="pb-sep">·</span><span class="pb-item">BACKTEST: 89% (n=30,847)</span><span class="pb-sep">·</span><span class="pb-item">BEST: <b id="pb-best">-</b></span><span class="pb-sep">·</span><span class="pb-item pb-posture" id="pb-posture">SCANNING</span></div><header style="padding:10px 14px;border-bottom:1px solid #1c1c1c"><strong>ANTI-BULLSHIT RUNNER INTELLIGENCE</strong></header>` +
+body{margin:0;background:#050505;color:#e5e7eb;font-family:"JetBrains Mono",monospace;font-size:11px}a{color:#60a5fa}.shell{min-height:100vh}.hero{margin:0;padding:24px 22px;border-bottom:1px solid #262626;display:grid;grid-template-columns:minmax(260px,1.1fr) minmax(260px,1fr);gap:18px}.hero h1{margin:0 0 10px;font-size:28px;line-height:1.05}.hero h2{font-size:14px;margin:0 0 12px;color:#cbd5e1}.hero ul{margin:6px 0 0;padding-left:18px}.hero-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.hero-actions a,.hero-actions button{border:1px solid #334155;background:#0b1220;color:#bfdbfe;padding:7px 10px;border-radius:4px;text-decoration:none;font:inherit}.hero-wow{box-shadow:inset 6px 0 0 #16a34a}.hero-review{box-shadow:inset 6px 0 0 #a78bfa}.hero-watch{box-shadow:inset 6px 0 0 #eab308}.hero-manipulated{box-shadow:inset 6px 0 0 #f97316}.hero-empty{box-shadow:inset 6px 0 0 #ef4444}.edge-proof{display:flex;justify-content:space-between;gap:16px;padding:14px 22px;border-bottom:1px solid #1c1c1c;background:#080808}.edge-proof h2{margin:0 0 6px;font-size:13px;color:#f8fafc}.proof-grid{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:14px}.proof-link{align-self:center;border:1px solid #334155;padding:7px 10px;border-radius:4px;text-decoration:none}.scan-table{width:100%;border-collapse:collapse}.scan-table th,.scan-table td{padding:8px;border-bottom:1px solid #1c1c1c;text-align:left}.scan-table tr.mode-dead{opacity:.62}.badge{border:1px solid #333;border-radius:3px;padding:3px 7px;font-weight:800}.mode-launch_wow,.mode-bonding_wow,.mode-migration_wow,.mode-revival_wow{color:#22c55e}.mode-review_candidate{color:#a78bfa}.mode-manipulated_momentum{color:#f97316}.mode-watch{color:#eab308}.mode-avoid{color:#ef4444}.mode-dead{color:#6b7280}.drawer{display:none}tr:focus .drawer,tr:hover .drawer{display:block;position:absolute;background:#090909;border:1px solid #333;padding:10px;max-width:620px;z-index:20}
+#proof-bar{background:#000;border-bottom:1px solid #1c1c1c;padding:6px 14px;font-family:monospace;font-size:10px;color:#5a6070;display:flex;gap:10px;align-items:center;letter-spacing:.05em}#proof-bar b{color:#e0e0e0}.pb-sep{color:#333}.pb-posture{font-weight:700;margin-left:auto}.pb-posture.wow-active{color:#4ade80}.pb-posture.review-active{color:#a78bfa}.pb-posture.watch-active{color:#fbbf24}.pb-posture.scanning{color:#fbbf24}.pb-posture.no-live-setup{color:#f87171}.live-dot.live{color:#4ade80;animation:pulse 2s infinite}.live-dot.stale{color:#fbbf24}.live-dot.dead{color:#f87171}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+#alert-panel{position:fixed;top:60px;right:14px;z-index:999;display:flex;flex-direction:column;gap:8px;max-width:340px}.live-alert{background:#0a1f0c;border:2px solid #16a34a;border-radius:4px;padding:12px;font-family:'JetBrains Mono',monospace;font-size:11px;color:#e2e2e2;animation:slideIn .3s ease;box-shadow:0 0 16px rgba(34,197,94,.4)}.live-alert.pinned{border-color:#4ade80;box-shadow:0 0 24px rgba(74,222,128,.6)}.la-band{font-weight:700;color:#4ade80;letter-spacing:.1em;margin-bottom:6px;font-size:10px}.la-name{font-size:13px;font-weight:700;color:#fff}.la-score{float:right;color:#a78bfa;font-weight:700}.la-reasons{color:#d1d5db;margin:6px 0;line-height:1.5}.la-risks{color:#fbbf24;font-size:10px;margin-bottom:4px}.la-inval{color:#f87171;font-size:10px;margin-bottom:6px}.la-actions{display:flex;gap:6px;margin-top:6px}.la-actions a,.la-actions button{background:transparent;border:1px solid #1d4ed8;color:#60a5fa;padding:4px 8px;border-radius:3px;font-size:10px;text-decoration:none;cursor:pointer;font-family:inherit}.la-actions a:hover,.la-actions button:hover{background:#0a0f1f}.la-meta{color:#5a6070;font-size:10px;margin-top:6px;border-top:1px solid #1c1c1c;padding-top:6px}.dead-toggle{padding:10px 14px;border-top:1px solid #1c1c1c}.dead-toggle summary{cursor:pointer;color:#9ca3af;font-weight:800}@keyframes slideIn{from{transform:translateX(360px);opacity:0}to{transform:translateX(0);opacity:1}}@media(max-width:760px){.hero,.edge-proof{grid-template-columns:1fr;display:block}.proof-grid{grid-template-columns:1fr}}</style></head><body><div class="shell"><div id="alert-panel"></div><div id="proof-bar"><span id="live-dot" class="live-dot live">●</span><span id="last-update-secs">0s ago</span><span class="pb-sep">·</span><span class="pb-item">SCANNED: <b id="pb-seen">` + fmt.Sprintf("%d", len(rows)) + `</b></span><span class="pb-sep">·</span><span class="pb-item">WOW: <b id="pb-wow">` + fmt.Sprintf("%d", counts["LAUNCH_WOW"]+counts["BONDING_WOW"]+counts["MIGRATION_WOW"]+counts["REVIVAL_WOW"]) + `</b></span><span class="pb-sep">·</span><span class="pb-item">REVIEW: <b id="pb-review">` + fmt.Sprintf("%d", counts["REVIEW_CANDIDATE"]) + `</b></span><span class="pb-sep">·</span><span class="pb-item">WATCH: <b id="pb-watch">` + fmt.Sprintf("%d", counts["WATCH"]) + `</b></span><span class="pb-sep">·</span><span class="pb-item">LIVE PRECISION: <b id="pb-prec">pending</b> (n=<b id="pb-n">0</b>)</span><span class="pb-sep">·</span><span class="pb-item">BACKTEST: 89% (n=30,847)</span><span class="pb-sep">·</span><span class="pb-item">BEST: <b id="pb-best">-</b></span><span class="pb-sep">·</span><span class="pb-item pb-posture" id="pb-posture">SCANNING</span></div><header style="padding:10px 14px;border-bottom:1px solid #1c1c1c"><strong>ANTI-BULLSHIT RUNNER INTELLIGENCE</strong></header>` +
 		proof + hero + `<table class="scan-table"><thead><tr><th>Mode</th><th>Tier</th><th>Score</th><th>Token</th><th>Why Now</th><th>Blocker</th><th>Action</th></tr></thead><tbody id="token-rows">` + renderWowLockedRows(rows, false) + `</tbody></table><details class="dead-toggle"><summary>Show DEAD / hidden rejected tokens (` + fmt.Sprintf("%d", deadCount) + `)</summary><table class="scan-table"><tbody id="dead-rows">` + renderWowLockedRows(rows, true) + `</tbody></table></details></div><script>
 const es=new EventSource('/api/alerts/stream');es.onmessage=function(e){if(!e.data||e.data.startsWith(':'))return;const a=JSON.parse(e.data);const el=document.createElement('div');el.className='live-alert';el.innerHTML=` + "`" + `<div class="la-band">WOW · ${a.age_minutes}m old<span class="la-score">${a.score.toFixed(1)}/100</span></div><div class="la-name">${a.symbol||'unnamed'} · ${a.mint.slice(0,12)}...</div><div class="la-reasons">${(a.reasons||[]).slice(0,4).join(' · ')}</div>${a.risk_flags&&a.risk_flags.length?` + "`" + `<div class="la-risks">Risk: ${a.risk_flags.slice(0,2).join(' · ')}</div>` + "`" + `:''}<div class="la-inval">Invalidates if: ${(a.invalidation||[]).slice(0,3).join(' · ')}</div><div class="la-actions"><a href="${a.gmgn_url}" target="_blank">GMGN ↗</a><a href="${a.solscan_url}" target="_blank">SOLSCAN ↗</a><button onclick="this.closest('.live-alert').classList.toggle('pinned');this.textContent=this.closest('.live-alert').classList.contains('pinned')?'PINNED':'PIN';">PIN</button></div><div class="la-meta">Backtest: ${a.historical_precision_pct}% (n=30,847) · Live: ${a.live_signals_total} signals</div>` + "`" + `;document.getElementById('alert-panel').prepend(el);setTimeout(function(){if(!el.classList.contains('pinned'))el.remove();},90000);};es.onerror=function(){console.warn('SSE connection lost');};
 let lastTableRefresh=Date.now();function refreshTable(){fetch('/api/live-snapshots?limit=200').then(r=>r.json()).then(()=>{lastTableRefresh=Date.now();}).catch(e=>console.warn('table refresh failed',e));}function updateLiveDot(){const age=Math.floor((Date.now()-lastTableRefresh)/1000);document.getElementById('last-update-secs').textContent=age+'s ago';const dot=document.getElementById('live-dot');dot.className='live-dot '+(age<10?'live':age<30?'stale':'dead');}
-function refreshProofBar(){fetch('/api/market-context').then(r=>r.json()).then(d=>{document.getElementById('pb-seen').textContent=d.tokens_seen_today;document.getElementById('pb-watch').textContent=d.watch_count||0;document.getElementById('pb-wow').textContent=d.wow_count||0;document.getElementById('pb-prec').textContent=d.live_precision_pct>0?d.live_precision_pct.toFixed(1):'pending';document.getElementById('pb-n').textContent=d.live_signals_total||0;document.getElementById('pb-best').textContent=d.best_score_today>0?d.best_score_today.toFixed(1):'-';const p=document.getElementById('pb-posture');p.textContent=d.market_posture;p.className='pb-posture '+String(d.market_posture||'scanning').toLowerCase().replaceAll(' ','-');});}refreshTable();refreshProofBar();setInterval(refreshTable,5000);setInterval(updateLiveDot,1000);setInterval(refreshProofBar,15000);</script></body></html>`
+function refreshProofBar(){fetch('/api/market-context').then(r=>r.json()).then(d=>{document.getElementById('pb-seen').textContent=d.tokens_seen_today;document.getElementById('pb-wow').textContent=d.wow_count||0;document.getElementById('pb-review').textContent=d.review_count||0;document.getElementById('pb-watch').textContent=d.watch_count||0;document.getElementById('pb-prec').textContent=d.live_precision_pct>0?d.live_precision_pct.toFixed(1):'pending';document.getElementById('pb-n').textContent=d.live_signals_total||0;document.getElementById('pb-best').textContent=d.best_score_today>0?d.best_score_today.toFixed(1):'-';const p=document.getElementById('pb-posture');p.textContent=d.market_posture;p.className='pb-posture '+String(d.market_posture||'scanning').toLowerCase().replaceAll(' ','-');});}refreshTable();refreshProofBar();setInterval(refreshTable,5000);setInterval(updateLiveDot,1000);setInterval(refreshProofBar,15000);</script></body></html>`
 }
 
 func renderProductHero(rows []map[string]any, counts map[string]int) string {
@@ -951,6 +954,8 @@ func renderProductHero(rows []map[string]any, counts map[string]int) string {
 	switch {
 	case setupWOWGo(best):
 		return renderWOWHero(best)
+	case mode == "REVIEW_CANDIDATE":
+		return renderReviewHero(best)
 	case mode == "MANIPULATED_MOMENTUM":
 		return renderManipulatedHero(best)
 	case mode == "WATCH":
@@ -977,6 +982,29 @@ func renderWOWHero(row map[string]any) string {
 		html.EscapeString(stringFieldMap(row, "liquidity_evidence_source")),
 		floatFieldMap(row, "sol_per_trade_5m"),
 		html.EscapeString(stringFieldMap(setup, "action")),
+	)
+}
+
+func renderReviewHero(row map[string]any) string {
+	setup := setupMapGo(row)
+	auth := authMapGo(row)
+	blockers := stringSliceFieldMap(setup, "blockers")
+	action := stringFieldMap(setup, "action")
+	return fmt.Sprintf(`<section id="heroCard" class="hero hero-review"><div><h1>LIVE REVIEW CANDIDATE</h1><h2>%s · %s · score %.0f/100</h2><strong>Not clean WOW yet:</strong>%s<p><strong>Review reason:</strong> %s</p><div class="hero-actions">%s</div></div><div><strong>Why it matters:</strong><ul><li>authenticity %.0f/100 (%s)</li><li>velocity %.4f SOL/trade</li><li>buyers %d/1m, %d/5m</li><li>liquidity %s via %s</li></ul><strong>Action:</strong> %s - no automatic entry.</div></section>`,
+		html.EscapeString(wowTokenLabel(row)),
+		html.EscapeString(stringFieldMap(row, "token_mode")),
+		floatFieldMap(setup, "proxy_score"),
+		htmlList(blockers, "operator review required before WOW"),
+		html.EscapeString(firstNonEmpty(stringFieldMap(setup, "review_reason"), "strong score, needs operator confirmation")),
+		heroButtons(row),
+		floatFieldMap(auth, "score"),
+		html.EscapeString(stringFieldMap(auth, "severity")),
+		floatFieldMap(row, "sol_per_trade_5m"),
+		int(floatFieldMap(row, "buyers_last1m")),
+		int(floatFieldMap(row, "buyers_last5m")),
+		html.EscapeString(liquidityLabelGo(row)),
+		html.EscapeString(stringFieldMap(row, "liquidity_evidence_source")),
+		html.EscapeString(actionLabelGo(action)),
 	)
 }
 
@@ -1068,6 +1096,9 @@ func renderWowLockedRows(rows []map[string]any, deadOnly bool) string {
 		if blockerDisplay != "none" {
 			blockerDisplay = blockerDisplay + " (" + blockerSeverity + ")"
 		}
+		if mode == "REVIEW_CANDIDATE" && blockerDisplay != "none" {
+			blockerDisplay = "blocked from WOW: " + blockerDisplay
+		}
 		why := firstNonEmpty(strings.Join(stringSliceFieldMap(setup, "reasons"), " · "), stringFieldMap(row, "why_now"), "waiting for evidence")
 		action := actionLabelGo(stringFieldMap(setup, "action"))
 		fmt.Fprintf(&b, `<tr tabindex="0" class="mode-%s"><td><span class="badge mode-%s">%s%s</span></td><td>%s</td><td>%.0f</td><td>%s<br><a href="%s" target="_blank" rel="noopener noreferrer">GMGN ↗</a> <a href="%s" target="_blank" rel="noopener noreferrer">Solscan ↗</a><br><span>%s</span><div class="drawer">Mode + Tier + Score: %s %s %.0f<br>Authenticity: bundle=%v (%s) sniper=%v (%s) bump=%v (%s) rhythm=%v identical_sizes=%v severity=%s score=%.0f flags=%s<br>Liquidity: depth %.2f source=%s reliable=%v<br>Velocity: %.4f SOL/trade %.4f SOL/unique buyer bonding_progress=%.2f bonding_velocity=%.4f<br>Buyer flow: 1m=%d 5m=%d buy/sell %.2f/%.2f<br>Holder concentration: %.1f%%<br>Outcome tracking: Phase 2 will populate</div></td><td>%s</td><td>%s</td><td>%s</td></tr>`,
@@ -1094,7 +1125,7 @@ func renderWowLockedRows(rows []map[string]any, deadOnly bool) string {
 		if deadOnly {
 			return `<tr><td colspan="7">No hidden rejected tokens.</td></tr>`
 		}
-		return `<tr><td colspan="7">No active WOW, WATCH, MANIPULATED, or AVOID rows.</td></tr>`
+		return `<tr><td colspan="7">No active WOW, REVIEW, WATCH, MANIPULATED, or AVOID rows.</td></tr>`
 	}
 	return b.String()
 }
@@ -1950,6 +1981,8 @@ func setupWOWGo(s map[string]any) bool {
 func setupModeRankGo(s map[string]any) int {
 	switch setupModeGo(s) {
 	case "LAUNCH_WOW", "BONDING_WOW", "MIGRATION_WOW", "REVIVAL_WOW":
+		return 6
+	case "REVIEW_CANDIDATE":
 		return 5
 	case "MANIPULATED_MOMENTUM":
 		return 4
@@ -1970,6 +2003,7 @@ func setupCountsGo(rows []map[string]any) map[string]int {
 		"BONDING_WOW":          0,
 		"MIGRATION_WOW":        0,
 		"REVIVAL_WOW":          0,
+		"REVIEW_CANDIDATE":     0,
 		"MANIPULATED_MOMENTUM": 0,
 		"WATCH":                0,
 		"AVOID":                0,
@@ -1994,7 +2028,9 @@ func setupLessGo(a map[string]any, b map[string]any) bool {
 func actionLabelGo(action string) string {
 	switch action {
 	case "PAPER_LOG":
-		return "LOG TO TRACKER"
+		return "LOG"
+	case "WATCH_1M":
+		return "REVIEW 1M"
 	case "WATCH_5M":
 		return "WATCH"
 	case "EXIT_AVOID":

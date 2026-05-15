@@ -27,6 +27,7 @@ const (
 	SetupBondingWOW          SetupMode = "BONDING_WOW"
 	SetupMigrationWOW        SetupMode = "MIGRATION_WOW"
 	SetupRevivalWOW          SetupMode = "REVIVAL_WOW"
+	SetupReviewCandidate     SetupMode = "REVIEW_CANDIDATE"
 	SetupManipulatedMomentum SetupMode = "MANIPULATED_MOMENTUM"
 	SetupWatch               SetupMode = "WATCH"
 	SetupAvoid               SetupMode = "AVOID"
@@ -77,6 +78,8 @@ type SetupResult struct {
 	Reasons           []string       `json:"reasons"`
 	Blockers          []string       `json:"blockers"`
 	BlockerSeverity   string         `json:"blocker_severity"`
+	Reviewable        bool           `json:"reviewable"`
+	ReviewReason      string         `json:"review_reason"`
 	Invalidation      []string       `json:"invalidation"`
 }
 

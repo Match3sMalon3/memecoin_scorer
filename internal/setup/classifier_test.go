@@ -156,6 +156,53 @@ func TestSetupBlockersNeverUseGenericPhrases(t *testing.T) {
 	}
 }
 
+func TestReviewCandidateHighScoreRevivalSoftBlockers(t *testing.T) {
+	row := reviewCandidateRow()
+
+	got := Classify(row)
+	if got.Mode != model.SetupReviewCandidate {
+		t.Fatalf("mode=%s want REVIEW_CANDIDATE: %+v", got.Mode, got)
+	}
+	if got.Action != model.ActionWatch1M && got.Action != model.ActionPaperLog {
+		t.Fatalf("action=%s want WATCH_1M or PAPER_LOG", got.Action)
+	}
+	if !got.Reviewable || got.ReviewReason == "" {
+		t.Fatalf("review fields missing: %+v", got)
+	}
+}
+
+func TestReviewCandidateRejectsFullFallback(t *testing.T) {
+	row := reviewCandidateRow()
+	row.ClusteringRowStatus = "full_fallback"
+	if got := Classify(row); got.Mode == model.SetupReviewCandidate {
+		t.Fatalf("full fallback became review candidate: %+v", got)
+	}
+}
+
+func TestReviewCandidateRejectsTerminalTop10(t *testing.T) {
+	row := reviewCandidateRow()
+	row.Top10HolderPct = 0.95
+	if got := Classify(row); got.Mode == model.SetupReviewCandidate {
+		t.Fatalf("terminal top10 became review candidate: %+v", got)
+	}
+}
+
+func TestReviewCandidateRejectsHighImpact(t *testing.T) {
+	row := reviewCandidateRow()
+	row.EstimatedImpactPct = 50
+	if got := Classify(row); got.Mode == model.SetupReviewCandidate {
+		t.Fatalf("high impact became review candidate: %+v", got)
+	}
+}
+
+func TestReviewCandidateRejectsMediumAuthenticity(t *testing.T) {
+	row := reviewCandidateRow()
+	row.Authenticity.Severity = "medium"
+	if got := Classify(row); got.Mode == model.SetupReviewCandidate {
+		t.Fatalf("medium authenticity became review candidate: %+v", got)
+	}
+}
+
 func setupRow(tokenMode model.TokenMode, score float64, severity string) model.LiveSnapshot {
 	row := model.LiveSnapshot{
 		TokenSnapshot: model.TokenSnapshot{
@@ -189,6 +236,21 @@ func manipulatedRow() model.LiveSnapshot {
 	row := setupRow(model.TokenModeLaunch, 70, "high")
 	row.Authenticity.Flags = []string{"bundle_bot"}
 	row.SolPerTrade5m = 1.0
+	return row
+}
+
+func reviewCandidateRow() model.LiveSnapshot {
+	row := setupRow(model.TokenModeRevival, 88, "none")
+	row.Authenticity.Score = 100
+	row.LaunchConfidence = model.LaunchConfidenceUnknown
+	row.ClusteringRowStatus = "partial_fallback"
+	row.RealPoolDepthSOL = 10
+	row.LiquidityEvidenceSource = "raydium_wsol_vault"
+	row.EstimatedImpactPct = 10
+	row.BuyersLast1m = 1
+	row.BuyersLast5m = 6
+	row.EffectiveBuyers5m = 6
+	row.SolPerTrade5m = 0.114
 	return row
 }
 

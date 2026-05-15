@@ -151,8 +151,44 @@ func TestRenderIndexHTML_DeadCollapsedByDefault(t *testing.T) {
 	if !strings.Contains(html, "Show DEAD / hidden rejected tokens (1)") {
 		t.Fatalf("dead toggle missing: %s", html)
 	}
-	if !strings.Contains(html, `<tbody id="token-rows"><tr><td colspan="7">No active WOW, WATCH, MANIPULATED, or AVOID rows.</td></tr>`) {
+	if !strings.Contains(html, `<tbody id="token-rows"><tr><td colspan="7">No active WOW, REVIEW, WATCH, MANIPULATED, or AVOID rows.</td></tr>`) {
 		t.Fatalf("dead row leaked into default table: %s", html)
+	}
+}
+
+func TestRenderIndexHTML_ReviewCandidateSurfacesInHero(t *testing.T) {
+	row := sampleLiveRow()
+	row["token_mode"] = "revival"
+	row["setup"] = map[string]any{
+		"mode":               "REVIEW_CANDIDATE",
+		"action":             "WATCH_1M",
+		"proxy_score":        88.0,
+		"authenticity_score": 100.0,
+		"reasons":            []any{"high-score setup requires operator review before WOW"},
+		"blockers":           []any{"partial clustering fallback", "unknown catalyst"},
+		"blocker_severity":   "avoid",
+		"reviewable":         true,
+		"review_reason":      "strong revival demand, blocked from WOW by partial clustering fallback and unknown catalyst",
+	}
+	row["authenticity"] = map[string]any{"score": 100.0, "severity": "none", "flags": []any{}}
+	row["clustering_row_status"] = "partial_fallback"
+	row["real_pool_depth_sol"] = 12.0
+	row["liquidity_evidence_source"] = "raydium_wsol_vault"
+	row["liquidity_proxy_reliable"] = true
+	app := &App{
+		cfg:              dashConfig{liveMode: true},
+		cachedLiveRows:   []map[string]any{row},
+		cachedLiveRowsAt: time.Now(),
+	}
+	html := app.renderIndexHTML()
+	if !strings.Contains(html, "LIVE REVIEW CANDIDATE") {
+		t.Fatalf("review candidate hero missing: %s", html)
+	}
+	if strings.Contains(strings.Split(html, "</section>")[0], "NO LIVE SETUP") {
+		t.Fatalf("hero says no live setup while review candidate exists: %s", html)
+	}
+	if !strings.Contains(html, "blocked from WOW: partial clustering fallback") {
+		t.Fatalf("review blocker copy missing from row: %s", html)
 	}
 }
 
@@ -215,6 +251,32 @@ func TestLiveSnapshotsDefaultLimitIs200(t *testing.T) {
 	}
 	if gotLimit != "200" {
 		t.Fatalf("upstream limit=%q, want 200", gotLimit)
+	}
+}
+
+func TestMarketContextCountsReviewCandidates(t *testing.T) {
+	row := sampleLiveRow()
+	row["setup"] = map[string]any{"mode": "REVIEW_CANDIDATE", "action": "WATCH_1M", "proxy_score": 88.0}
+	app := &App{
+		cfg:              dashConfig{liveMode: true},
+		cachedLiveRows:   []map[string]any{row},
+		cachedLiveRowsAt: time.Now(),
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/market-context", nil)
+	rr := httptest.NewRecorder()
+	app.handleMarketContext(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got := int(body["review_count"].(float64)); got != 1 {
+		t.Fatalf("review_count=%d, want 1; body=%v", got, body)
+	}
+	if got := body["market_posture"].(string); got != "REVIEW ACTIVE" {
+		t.Fatalf("market_posture=%q, want REVIEW ACTIVE", got)
 	}
 }
 
