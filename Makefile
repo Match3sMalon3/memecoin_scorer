@@ -513,3 +513,6 @@ reset-state:
 		"http://localhost:$(_IPORT)/admin/reset-state?confirm=RESET_LIVE_STATE" \
 		| python3 -m json.tool || \
 		echo "ERROR: reset failed — is ENABLE_LOCAL_ADMIN=1 set on the running ingestor?"
+
+smoke-dashboard:
+	./scripts/smoke_dashboard.sh
