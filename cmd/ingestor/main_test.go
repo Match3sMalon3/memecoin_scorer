@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -507,12 +508,27 @@ func TestSnapshots_FieldsPresent(t *testing.T) {
 }
 
 type fakeOutcomeRecorder struct {
+	mu   sync.Mutex
 	rows []model.LiveSnapshot
 }
 
 func (f *fakeOutcomeRecorder) RecordSignalSnapshot(_ context.Context, row model.LiveSnapshot) (int64, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.rows = append(f.rows, row)
 	return int64(len(f.rows)), true, nil
+}
+
+func (f *fakeOutcomeRecorder) len() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.rows)
+}
+
+func (f *fakeOutcomeRecorder) first() model.LiveSnapshot {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.rows[0]
 }
 
 func TestSnapshots_RecordsClassifiedRows(t *testing.T) {
@@ -536,16 +552,68 @@ func TestSnapshots_RecordsClassifiedRows(t *testing.T) {
 	if len(snaps) != 1 {
 		t.Fatalf("len=%d, want one live row", len(snaps))
 	}
-	if len(recorder.rows) != 1 {
-		t.Fatalf("recorded rows=%d, want 1", len(recorder.rows))
-	}
-	row := recorder.rows[0]
+	waitFor(t, time.Second, func() bool { return recorder.len() == 1 }, "outcome row recorded")
+	row := recorder.first()
 	if row.Setup.Mode == "" || row.Setup.Action == "" {
 		t.Fatalf("recorded row missing setup classification: %+v", row.Setup)
 	}
 	if row.TokenMode == "" {
 		t.Fatalf("recorded row missing token mode")
 	}
+}
+
+type slowHeliusResolver struct{}
+
+func (slowHeliusResolver) ResolveParent(ctx context.Context, wallet string, _ time.Time) (string, bool, error) {
+	select {
+	case <-time.After(3 * time.Second):
+		return wallet, false, nil
+	case <-ctx.Done():
+		return wallet, false, ctx.Err()
+	}
+}
+
+func (slowHeliusResolver) IsHealthy() bool     { return true }
+func (slowHeliusResolver) BackendName() string { return "helius" }
+
+func TestSnapshots_HeliusPathReturnsCachedRowsWithoutBlockingOnSlowResolver(t *testing.T) {
+	store := state.New()
+	cfg := live.DefaultLiveConfig()
+	cfg.FunderResolver = slowHeliusResolver{}
+	srv := httptest.NewServer(newServerWithCalibration(
+		store,
+		nil,
+		calibration.NewRecorder(),
+		"",
+		cfg,
+		ingestor.NewIngressHealth(),
+		nil,
+		nil,
+		nil,
+	))
+	t.Cleanup(srv.Close)
+	applySnapshot(t, store, testMint, 3, 2.0, time.Now().Add(-30*time.Second))
+
+	start := time.Now()
+	snaps := getSnapshots(t, srv, "?min_buyers=0&since_minutes=5&limit=200&actionable_only=0")
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("/api/snapshots blocked for %s; want cached response under 500ms", elapsed)
+	}
+	if snaps == nil {
+		t.Fatal("snapshots response decoded to nil; want JSON array")
+	}
+}
+
+func waitFor(t *testing.T, timeout time.Duration, ok func() bool, label string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if ok() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", label)
 }
 
 func TestSnapshots_NilOutcomeRecorderDoesNotPanic(t *testing.T) {

@@ -11,6 +11,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"memecoin_scorer/internal/authenticity"
@@ -37,6 +39,28 @@ const maxSnapshotLimit = 500
 
 type signalSnapshotRecorder interface {
 	RecordSignalSnapshot(context.Context, model.LiveSnapshot) (int64, bool, error)
+}
+
+type snapshotQuery struct {
+	minBuyers      int
+	sinceMinutes   int
+	limit          int
+	actionableOnly bool
+}
+
+type snapshotBuildResult struct {
+	rows          []model.ScoredSnapshot
+	snapshotCount int
+	pricedRows    int
+	marketCapRows int
+	duration      time.Duration
+}
+
+type snapshotCache struct {
+	mu         sync.RWMutex
+	rows       []model.ScoredSnapshot
+	updatedAt  time.Time
+	refreshing atomic.Bool
 }
 
 // resolverFromEnv selects and constructs the active FunderResolver.
@@ -529,160 +553,269 @@ func makeWebhookHandler(store *state.Store, dbStore *db.Store, secret string, de
 }
 
 func makeSnapshotsHandler(store *state.Store, dbStore *db.Store, calibrationRecorder *calibration.Recorder, liveCfg live.LiveConfig, outcomeRecorder signalSnapshotRecorder) http.HandlerFunc {
+	cache := &snapshotCache{}
+	useCachedPath := cluster.ResolverBackendName(liveCfg.FunderResolver) == "helius"
+	if useCachedPath {
+		go cache.refreshLoop(store, dbStore, calibrationRecorder, liveCfg, outcomeRecorder)
+	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		q := r.URL.Query()
-		minBuyers := queryNonNegInt(q.Get("min_buyers"), 0)
-		sinceMinutes := queryInt(q.Get("since_minutes"), 30)
-		limit := queryInt(q.Get("limit"), 200)
-		if limit > maxSnapshotLimit {
-			limit = maxSnapshotLimit
+		query := parseSnapshotQuery(r)
+		start := time.Now()
+		var res snapshotBuildResult
+		if useCachedPath {
+			cache.triggerRefresh(store, dbStore, calibrationRecorder, liveCfg, outcomeRecorder)
+			res = cache.filtered(query, time.Now())
+			log.Printf("snapshots api latency: source=cache total_ms=%d cache_age_ms=%d rows=%d",
+				time.Since(start).Milliseconds(), time.Since(cache.updated()).Milliseconds(), len(res.rows))
+		} else {
+			res = buildSnapshotRows(store, dbStore, calibrationRecorder, liveCfg, outcomeRecorder, query, true)
+			log.Printf("snapshots api latency: source=sync total_ms=%d build_ms=%d rows=%d",
+				time.Since(start).Milliseconds(), res.duration.Milliseconds(), len(res.rows))
 		}
-		if limit <= 0 {
-			limit = 200
-		}
-		actionableOnly := q.Get("actionable_only") == "1"
-
-		now := time.Now()
-		snapshots := store.RecentTokens(time.Duration(sinceMinutes) * time.Minute)
-
-		out := make([]model.ScoredSnapshot, 0, len(snapshots))
-		pricedRows := 0
-		marketCapRows := 0
-		for _, s := range snapshots {
-			if s.UniqueBuyerCount < minBuyers {
-				continue
-			}
-			d := live.ClassifyAt(s, liveCfg, now)
-			scored := model.ScoredSnapshot{
-				TokenSnapshot:               s,
-				Decision:                    d.Label,
-				Reasons:                     d.Reasons,
-				ExecutionPenalty:            d.ExecutionPenalty,
-				LiquidityProxySOL:           d.LiquidityProxySOL,
-				LiquidityEvidenceSource:     d.LiquidityEvidenceSource,
-				LiquidityEvidenceAgeSeconds: d.LiquidityEvidenceAgeSeconds,
-				LiquidityProxyReliable:      d.LiquidityProxyReliable,
-				AdversarialScore:            d.AdversarialScore,
-				TradeSizeSOL:                d.TradeSizeSOL,
-				EstimatedImpactPct:          d.EstimatedImpactPct,
-				EffectiveBuyers1m:           d.EffectiveBuyers1m,
-				EffectiveBuyers5m:           d.EffectiveBuyers5m,
-				ClusteredBuyerCount:         d.ClusteredBuyerCount,
-				FundingClusterRatio:         d.FundingClusterRatio,
-				ClusterCompressionRatio1m:   d.ClusterCompressionRatio1m,
-				ClusterCompressionRatio5m:   d.ClusterCompressionRatio5m,
-				ClusteringStatus:            d.ClusteringStatus,
-				ClusteringBackend:           d.ClusteringBackend,
-				ClusteringRowStatus:         d.ClusteringRowStatus,
-				ClusteringTimeouts:          d.ClusteringTimeouts,
-				ClusteringFallbacks:         d.ClusteringFallbacks,
-				SignalState:                 d.SignalState,
-				IsActionable:                d.IsActionable,
-				ConfidenceScore:             d.ConfidenceScore,
-				WarmingUp:                   d.WarmingUp,
-				WhyNow:                      d.WhyNow,
-				WhyNotHigher:                d.WhyNotHigher,
-				DominantBlocker:             d.DominantBlocker,
-				OperatorVerdict:             d.OperatorVerdict,
-				ExecutionURL:                d.ExecutionURL,
-				HistoricalAnalogueSummary:   d.HistoricalAnalogueSummary,
-				HistoricalOutcomeBand:       d.HistoricalOutcomeBand,
-				HistoricalTimeToOutcome:     d.HistoricalTimeToOutcome,
-				UpgradeTriggers:             d.UpgradeTriggers,
-				InvalidateTriggers:          d.InvalidateTriggers,
-				ActionabilityLabel:          d.ActionabilityLabel,
-				PriorityLabel:               d.PriorityLabel,
-				LastPriceSol:                s.LastPriceSOL,
-				MarketCapSol:                s.MarketCapSOL,
-				Layer0Reject:                d.Engine.Layer0Reject,
-				Shadow:                      shadow.EvaluateShadowScore(&s, now),
-				Engine:                      d.Engine,
-			}
-			scored.ExecutionURL = live.BuildExecutionURL(scored.Mint)
-			scored.WhyNow = live.BuildWhyNow(&scored)
-			scored.WhyNotHigher = live.BuildWhyNotHigher(&scored)
-			scored.DominantBlocker = live.BuildDominantBlocker(&scored)
-			scored.OperatorVerdict = live.BuildOperatorVerdict(&scored)
-			scored.ActionabilityLabel = live.BuildActionabilityLabel(&scored)
-			scored.HistoricalAnalogueSummary = live.BuildHistoricalAnalogueSummary(&scored)
-			scored.HistoricalOutcomeBand = live.BuildHistoricalOutcomeBand(&scored)
-			scored.HistoricalTimeToOutcome = live.BuildHistoricalTimeToOutcome(&scored)
-			scored.UpgradeTriggers = live.BuildUpgradeTriggers(&scored)
-			scored.InvalidateTriggers = live.BuildInvalidateTriggers(&scored)
-			buys5m := store.GetBuyEvents(scored.Mint, 5*time.Minute)
-			totalBuySOL5m := 0.0
-			uniqueBuyers5m := map[string]bool{}
-			for _, buy := range buys5m {
-				totalBuySOL5m += buy.SolAmount
-				if buy.Wallet != "" {
-					uniqueBuyers5m[buy.Wallet] = true
-				}
-			}
-			if len(buys5m) > 0 {
-				scored.SolPerTrade5m = totalBuySOL5m / float64(len(buys5m))
-				scored.SOLPerTrade5m = scored.SolPerTrade5m
-			}
-			if len(uniqueBuyers5m) > 0 {
-				scored.SolPerUniqueBuyer5m = totalBuySOL5m / float64(len(uniqueBuyers5m))
-				scored.SOLPerBuyer5m = scored.SolPerUniqueBuyer5m
-			}
-			if scored.BondingCurveProgressPct == 0 {
-				scored.BondingCurveProgressPct = -1
-			}
-			if scored.BondingCurveProgressPct > 0 && scored.VSolPerMinute > 0 {
-				scored.BondingVelocitySolPerMin = scored.VSolPerMinute
-				scored.BondingEvidenceSource = "exact"
-			} else if scored.IsPumpFun && scored.ObservedAgeSeconds > 0 {
-				scored.BondingVelocitySolPerMin = bondingVelocityProxy(scored.TotalBuySOL, scored.ObservedAgeSeconds)
-				scored.BondingEvidenceSource = "flow_proxy"
-			} else {
-				scored.BondingEvidenceSource = "unknown"
-			}
-			if scored.BondingCurveProgressPct >= 0 {
-				scored.GraduationProximityPct = 100 - scored.BondingCurveProgressPct
-			}
-			scored.TradesToReachCurrentVsol = len(store.GetBuyEvents(scored.Mint, 24*time.Hour))
-			proxy.ApplyAuthenticityEvidence(&scored)
-			scored.EarlyProxy = proxy.ScoreEarlyProxy(scored)
-			scored.TokenMode = mode.Classify(scored)
-			scored.Catalyst = catalyst.Detect(scored)
-			scored.Authenticity = authenticity.Detect(scored, buys5m, store.GetWalletEvents(scored.Mint), store.GetCreationBlock(scored.Mint))
-			scored.Setup = setup.Classify(scored)
-			scored.ReviewChecklist = scored.Setup.ReviewChecklist
-			recordSignalSnapshot(context.WithoutCancel(r.Context()), outcomeRecorder, scored)
-			// Persist actionable BUY/READY signals to DB and emit console line.
-			if scored.IsActionable && (scored.Decision == "BUY" || scored.Decision == "READY") {
-				go dbStore.InsertSignal(context.WithoutCancel(r.Context()), scored)
-				logSignalLine(scored)
-			}
-			if actionableOnly && !scored.IsActionable {
-				continue
-			}
-			if scored.LastPriceSOL > 0 {
-				pricedRows++
-			}
-			if scored.MarketCapSOL > 0 {
-				marketCapRows++
-			}
-			out = append(out, scored)
-			if len(out) >= limit {
-				break
-			}
-		}
-		live.AssignPriorityLabels(out)
-		calibrationRecorder.ObserveRows(out, now)
 		log.Printf("snapshots api: snapshot_count=%d row_count=%d priced_rows=%d market_cap_rows=%d min_buyers=%d since_minutes=%d actionable_only=%t",
-			len(snapshots), len(out), pricedRows, marketCapRows, minBuyers, sinceMinutes, actionableOnly)
+			res.snapshotCount, len(res.rows), res.pricedRows, res.marketCapRows, query.minBuyers, query.sinceMinutes, query.actionableOnly)
 
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(out); err != nil {
+		if err := json.NewEncoder(w).Encode(res.rows); err != nil {
 			log.Printf("snapshots encode: %v", err)
 		}
 	}
+}
+
+func parseSnapshotQuery(r *http.Request) snapshotQuery {
+	q := r.URL.Query()
+	limit := queryInt(q.Get("limit"), 200)
+	if limit > maxSnapshotLimit {
+		limit = maxSnapshotLimit
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+	return snapshotQuery{
+		minBuyers:      queryNonNegInt(q.Get("min_buyers"), 0),
+		sinceMinutes:   queryInt(q.Get("since_minutes"), 30),
+		limit:          limit,
+		actionableOnly: q.Get("actionable_only") == "1",
+	}
+}
+
+func (c *snapshotCache) refreshLoop(store *state.Store, dbStore *db.Store, calibrationRecorder *calibration.Recorder, liveCfg live.LiveConfig, outcomeRecorder signalSnapshotRecorder) {
+	c.refresh(store, dbStore, calibrationRecorder, liveCfg, outcomeRecorder)
+	t := time.NewTicker(5 * time.Second)
+	defer t.Stop()
+	for range t.C {
+		c.refresh(store, dbStore, calibrationRecorder, liveCfg, outcomeRecorder)
+	}
+}
+
+func (c *snapshotCache) triggerRefresh(store *state.Store, dbStore *db.Store, calibrationRecorder *calibration.Recorder, liveCfg live.LiveConfig, outcomeRecorder signalSnapshotRecorder) {
+	if time.Since(c.updated()) < 5*time.Second {
+		return
+	}
+	go c.refresh(store, dbStore, calibrationRecorder, liveCfg, outcomeRecorder)
+}
+
+func (c *snapshotCache) refresh(store *state.Store, dbStore *db.Store, calibrationRecorder *calibration.Recorder, liveCfg live.LiveConfig, outcomeRecorder signalSnapshotRecorder) {
+	if !c.refreshing.CompareAndSwap(false, true) {
+		return
+	}
+	defer c.refreshing.Store(false)
+	query := snapshotQuery{minBuyers: 0, sinceMinutes: 240, limit: maxSnapshotLimit}
+	res := buildSnapshotRows(store, dbStore, calibrationRecorder, liveCfg, outcomeRecorder, query, true)
+	c.mu.Lock()
+	c.rows = append(c.rows[:0], res.rows...)
+	c.updatedAt = time.Now()
+	c.mu.Unlock()
+	log.Printf("snapshots cache refresh: rows=%d snapshot_count=%d duration_ms=%d", len(res.rows), res.snapshotCount, res.duration.Milliseconds())
+}
+
+func (c *snapshotCache) updated() time.Time {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.updatedAt
+}
+
+func (c *snapshotCache) filtered(query snapshotQuery, now time.Time) snapshotBuildResult {
+	c.mu.RLock()
+	rows := append([]model.ScoredSnapshot(nil), c.rows...)
+	updated := c.updatedAt
+	c.mu.RUnlock()
+	cutoff := now.Add(-time.Duration(query.sinceMinutes) * time.Minute)
+	out := make([]model.ScoredSnapshot, 0, minInt(query.limit, len(rows)))
+	pricedRows := 0
+	marketCapRows := 0
+	for _, row := range rows {
+		if row.LastEventAt.Before(cutoff) || row.UniqueBuyerCount < query.minBuyers {
+			continue
+		}
+		if query.actionableOnly && !row.IsActionable {
+			continue
+		}
+		if row.LastPriceSOL > 0 {
+			pricedRows++
+		}
+		if row.MarketCapSOL > 0 {
+			marketCapRows++
+		}
+		out = append(out, row)
+		if len(out) >= query.limit {
+			break
+		}
+	}
+	_ = updated
+	return snapshotBuildResult{rows: out, snapshotCount: len(rows), pricedRows: pricedRows, marketCapRows: marketCapRows}
+}
+
+func buildSnapshotRows(store *state.Store, dbStore *db.Store, calibrationRecorder *calibration.Recorder, liveCfg live.LiveConfig, outcomeRecorder signalSnapshotRecorder, query snapshotQuery, recordOutcomes bool) snapshotBuildResult {
+	start := time.Now()
+	now := time.Now()
+	snapshots := store.RecentTokens(time.Duration(query.sinceMinutes) * time.Minute)
+	out := make([]model.ScoredSnapshot, 0, minInt(query.limit, len(snapshots)))
+	pricedRows := 0
+	marketCapRows := 0
+	for _, s := range snapshots {
+		if s.UniqueBuyerCount < query.minBuyers {
+			continue
+		}
+		scored := buildScoredSnapshot(store, liveCfg, s, now)
+		if recordOutcomes {
+			go recordSignalSnapshot(context.Background(), outcomeRecorder, scored)
+		}
+		if dbStore != nil && scored.IsActionable && (scored.Decision == "BUY" || scored.Decision == "READY") {
+			go dbStore.InsertSignal(context.Background(), scored)
+			logSignalLine(scored)
+		}
+		if query.actionableOnly && !scored.IsActionable {
+			continue
+		}
+		if scored.LastPriceSOL > 0 {
+			pricedRows++
+		}
+		if scored.MarketCapSOL > 0 {
+			marketCapRows++
+		}
+		out = append(out, scored)
+		if len(out) >= query.limit {
+			break
+		}
+	}
+	live.AssignPriorityLabels(out)
+	if calibrationRecorder != nil {
+		calibrationRecorder.ObserveRows(out, now)
+	}
+	return snapshotBuildResult{rows: out, snapshotCount: len(snapshots), pricedRows: pricedRows, marketCapRows: marketCapRows, duration: time.Since(start)}
+}
+
+func buildScoredSnapshot(store *state.Store, liveCfg live.LiveConfig, s model.TokenSnapshot, now time.Time) model.ScoredSnapshot {
+	d := live.ClassifyAt(s, liveCfg, now)
+	scored := model.ScoredSnapshot{
+		TokenSnapshot:               s,
+		Decision:                    d.Label,
+		Reasons:                     d.Reasons,
+		ExecutionPenalty:            d.ExecutionPenalty,
+		LiquidityProxySOL:           d.LiquidityProxySOL,
+		LiquidityEvidenceSource:     d.LiquidityEvidenceSource,
+		LiquidityEvidenceAgeSeconds: d.LiquidityEvidenceAgeSeconds,
+		LiquidityProxyReliable:      d.LiquidityProxyReliable,
+		AdversarialScore:            d.AdversarialScore,
+		TradeSizeSOL:                d.TradeSizeSOL,
+		EstimatedImpactPct:          d.EstimatedImpactPct,
+		EffectiveBuyers1m:           d.EffectiveBuyers1m,
+		EffectiveBuyers5m:           d.EffectiveBuyers5m,
+		ClusteredBuyerCount:         d.ClusteredBuyerCount,
+		FundingClusterRatio:         d.FundingClusterRatio,
+		ClusterCompressionRatio1m:   d.ClusterCompressionRatio1m,
+		ClusterCompressionRatio5m:   d.ClusterCompressionRatio5m,
+		ClusteringStatus:            d.ClusteringStatus,
+		ClusteringBackend:           d.ClusteringBackend,
+		ClusteringRowStatus:         d.ClusteringRowStatus,
+		ClusteringTimeouts:          d.ClusteringTimeouts,
+		ClusteringFallbacks:         d.ClusteringFallbacks,
+		SignalState:                 d.SignalState,
+		IsActionable:                d.IsActionable,
+		ConfidenceScore:             d.ConfidenceScore,
+		WarmingUp:                   d.WarmingUp,
+		WhyNow:                      d.WhyNow,
+		WhyNotHigher:                d.WhyNotHigher,
+		DominantBlocker:             d.DominantBlocker,
+		OperatorVerdict:             d.OperatorVerdict,
+		ExecutionURL:                d.ExecutionURL,
+		HistoricalAnalogueSummary:   d.HistoricalAnalogueSummary,
+		HistoricalOutcomeBand:       d.HistoricalOutcomeBand,
+		HistoricalTimeToOutcome:     d.HistoricalTimeToOutcome,
+		UpgradeTriggers:             d.UpgradeTriggers,
+		InvalidateTriggers:          d.InvalidateTriggers,
+		ActionabilityLabel:          d.ActionabilityLabel,
+		PriorityLabel:               d.PriorityLabel,
+		LastPriceSol:                s.LastPriceSOL,
+		MarketCapSol:                s.MarketCapSOL,
+		Layer0Reject:                d.Engine.Layer0Reject,
+		Shadow:                      shadow.EvaluateShadowScore(&s, now),
+		Engine:                      d.Engine,
+	}
+	scored.ExecutionURL = live.BuildExecutionURL(scored.Mint)
+	scored.WhyNow = live.BuildWhyNow(&scored)
+	scored.WhyNotHigher = live.BuildWhyNotHigher(&scored)
+	scored.DominantBlocker = live.BuildDominantBlocker(&scored)
+	scored.OperatorVerdict = live.BuildOperatorVerdict(&scored)
+	scored.ActionabilityLabel = live.BuildActionabilityLabel(&scored)
+	scored.HistoricalAnalogueSummary = live.BuildHistoricalAnalogueSummary(&scored)
+	scored.HistoricalOutcomeBand = live.BuildHistoricalOutcomeBand(&scored)
+	scored.HistoricalTimeToOutcome = live.BuildHistoricalTimeToOutcome(&scored)
+	scored.UpgradeTriggers = live.BuildUpgradeTriggers(&scored)
+	scored.InvalidateTriggers = live.BuildInvalidateTriggers(&scored)
+	buys5m := store.GetBuyEvents(scored.Mint, 5*time.Minute)
+	totalBuySOL5m := 0.0
+	uniqueBuyers5m := map[string]bool{}
+	for _, buy := range buys5m {
+		totalBuySOL5m += buy.SolAmount
+		if buy.Wallet != "" {
+			uniqueBuyers5m[buy.Wallet] = true
+		}
+	}
+	if len(buys5m) > 0 {
+		scored.SolPerTrade5m = totalBuySOL5m / float64(len(buys5m))
+		scored.SOLPerTrade5m = scored.SolPerTrade5m
+	}
+	if len(uniqueBuyers5m) > 0 {
+		scored.SolPerUniqueBuyer5m = totalBuySOL5m / float64(len(uniqueBuyers5m))
+		scored.SOLPerBuyer5m = scored.SolPerUniqueBuyer5m
+	}
+	if scored.BondingCurveProgressPct == 0 {
+		scored.BondingCurveProgressPct = -1
+	}
+	if scored.BondingCurveProgressPct > 0 && scored.VSolPerMinute > 0 {
+		scored.BondingVelocitySolPerMin = scored.VSolPerMinute
+		scored.BondingEvidenceSource = "exact"
+	} else if scored.IsPumpFun && scored.ObservedAgeSeconds > 0 {
+		scored.BondingVelocitySolPerMin = bondingVelocityProxy(scored.TotalBuySOL, scored.ObservedAgeSeconds)
+		scored.BondingEvidenceSource = "flow_proxy"
+	} else {
+		scored.BondingEvidenceSource = "unknown"
+	}
+	if scored.BondingCurveProgressPct >= 0 {
+		scored.GraduationProximityPct = 100 - scored.BondingCurveProgressPct
+	}
+	scored.TradesToReachCurrentVsol = len(store.GetBuyEvents(scored.Mint, 24*time.Hour))
+	proxy.ApplyAuthenticityEvidence(&scored)
+	scored.EarlyProxy = proxy.ScoreEarlyProxy(scored)
+	scored.TokenMode = mode.Classify(scored)
+	scored.Catalyst = catalyst.Detect(scored)
+	scored.Authenticity = authenticity.Detect(scored, buys5m, store.GetWalletEvents(scored.Mint), store.GetCreationBlock(scored.Mint))
+	scored.Setup = setup.Classify(scored)
+	scored.ReviewChecklist = scored.Setup.ReviewChecklist
+	return scored
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func recordSignalSnapshot(ctx context.Context, recorder signalSnapshotRecorder, row model.LiveSnapshot) {
